@@ -1,5 +1,5 @@
 
-#define DEBUG
+//#define DEBUG
 
 #include "common.h"
 
@@ -1413,6 +1413,12 @@ bool DecodeBmp()
 {
     memcpy(&BmpInfoHeader, &BmpRaw[BIH_OFFSET], sizeof(BmpInfoHeader));
 
+    if (BmpInfoHeader.biWidth % 128 != 0)
+    {
+        cerr << "Invalid image size. The image must have a width of 128 pixels (16 chars).\n";
+        return false;
+    }
+
     int ColMax = 0;
     if (BmpInfoHeader.biBitCount == 1)
     {
@@ -1426,20 +1432,18 @@ bool DecodeBmp()
     {
         ColMax = 256;
     }
-    
+
     PBITMAPINFO BmpInfo = (PBITMAPINFO)new char[sizeof(BITMAPINFOHEADER) + (ColMax * sizeof(RGBQUAD))];
 
-    //BmpInfo->bmiHeader = BmpInfoHeader;
     memcpy(&BmpInfo->bmiHeader, &BmpInfoHeader, sizeof(BmpInfoHeader));
     
-    for (size_t i = 0; i < ColMax; i++)
+    for (size_t i = 0; i < (size_t)ColMax; i++)
     {
         memcpy(&BmpInfo->bmiColors[i], &BmpRaw[0x36 + (i * 4)], sizeof(RGBQUAD));
     }
 
     size_t DataOffset = (size_t)BmpRaw[DATA_OFFSET_OFFSET] + (size_t)(BmpRaw[DATA_OFFSET_OFFSET + 1] * 0x100) + (size_t)(BmpRaw[DATA_OFFSET_OFFSET + 2] * 0x10000) + (size_t)(BmpRaw[DATA_OFFSET_OFFSET + 3] * 01000000);
 
-    size_t RowCnt = BmpInfo->bmiHeader.biHeight;                                            //704
     size_t RowLen = BmpInfo->bmiHeader.biWidth / (double)((double)8 / BmpInfo->bmiHeader.biBitCount);       //256/(8/1)=32
     size_t PaddedRowLen = (RowLen % 4) == 0 ? RowLen : RowLen - (RowLen % 4) + 4;           //32
 
@@ -1494,7 +1498,7 @@ bool DecodeBmp()
             }
         }
     }
-    else if (BmpInfo->bmiHeader.biBitCount = 24)
+    else if (BmpInfo->bmiHeader.biBitCount == 24)
     {
         //No Palette
         for (int y = (BmpInfo->bmiHeader.biHeight - 1); y >= 0; y--)
@@ -1550,7 +1554,7 @@ bool ConvertImgToDirArt()
 {
     if (DirArtType == ".png")
     {
-        //decode
+        //Load and decode PNG image
         unsigned error = lodepng::decode(Image, ImgWidth, ImgHeight, InFileName);
 
         //if there's an error, display it
@@ -1573,8 +1577,10 @@ bool ConvertImgToDirArt()
     {
         ReadBinaryFile(InFileName, BmpRaw);
 
-        DecodeBmp();
-
+        if(!DecodeBmp())
+        {
+            return false;
+        }
     }
 
     if (!IdentyfyColors())
@@ -1964,7 +1970,7 @@ int main(int argc, char* argv[])
     {
 
     #ifdef DEBUG
-        InFileName = "c:\\Users\\Tamas\\OneDrive\\C64\\C++\\dart\\test\\Jab.bmp";
+        InFileName = "c:\\Users\\Tamas\\OneDrive\\C64\\C++\\dart\\test\\Test_2bit.bmp";
     #else
 
         cout << "Usage: dart input[*] [output.d64]\n\n";
