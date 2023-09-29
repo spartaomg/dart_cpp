@@ -1,5 +1,5 @@
 
-#define DEBUG
+//#define DEBUG
 
 #include "common.h"
 
@@ -1369,8 +1369,8 @@ bool IdentyfyColors()
 
 bool DecodeBmp()
 {
-    const size_t BIH = 0x0e;            //Bitmap Info Header pointer within raw data
-    const size_t DATA_OFFSET = 0x0a;    //Bitmap data offset pointer within raw data
+    const size_t BIH = 0x0e;            //Offset of Bitmap Info Header within raw data
+    const size_t DATA_OFFSET = 0x0a;    //Offset of Bitmap Data Start within raw data
 
     memcpy(&BmpInfoHeader, &BmpRaw[BIH], sizeof(BmpInfoHeader));
 
@@ -1380,19 +1380,7 @@ bool DecodeBmp()
         return false;
     }
 
-    int ColMax = 0;
-    if (BmpInfoHeader.biBitCount == 1)
-    {
-        ColMax = 2;
-    }
-    else if (BmpInfoHeader.biBitCount == 4)
-    {
-        ColMax = 16;
-    }
-    else if (BmpInfoHeader.biBitCount == 8)
-    {
-        ColMax = 256;
-    }
+    int ColMax = (BmpInfoHeader.biBitCount < 24) ? (1 << BmpInfoHeader.biBitCount) : 0;
 
     PBITMAPINFO BmpInfo = (PBITMAPINFO)new char[sizeof(BITMAPINFOHEADER) + (ColMax * sizeof(RGBQUAD))];
     
@@ -1801,21 +1789,21 @@ void ShowInfo()
     cout << "Accepted input file types:\n";
     cout << "--------------------------\n";
     cout << "D64  - DART will import all directory entries from the input file to the output file.\n\n";
-    cout << "PRG  - DART accepts two file formats: screen RAM grabs (40-byte long char rows of which the first 16 is used as dir\n";
+    cout << "PRG  - DART accepts two file formats: screen RAM grabs (40-byte long char rows of which the first 16 are used as dir\n";
     cout << "       entries, can be more than 25 char rows long) and $a0 byte terminated directory entries*. If an $a0 byte is not\n";
     cout << "       detected sooner, then 16 bytes are imported per directory entry. DART then skips up to 24 bytes or until an\n";
     cout << "       $a0 byte detected. Example source code for $a0-terminated .PRG (KickAss format, must be compiled):\n\n";
-    cout << "       * = $1000              // Address can be anything, will be skipped by DART\n";
-    cout << "       .text ""hello world!""   // This will be upper case once compiled\n";
-    cout << "       .byte $a0              // Terminates directory entry\n";
-    cout << "       .byte $30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$01,$02,$03,$04,$05,$06,$a0\n\n";
+    cout << "           * = $1000              // Address can be anything, will be skipped by DART\n";
+    cout << "           .text \"hello world!\"   // This will be upper case once compiled\n";
+    cout << "           .byte $a0              // Terminates directory entry\n";
+    cout << "           .byte $30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$01,$02,$03,$04,$05,$06,$a0\n\n";
     cout << "       *Char code $a0 (inverted space) is also used in standard directories to mark the end of entries.\n\n";
-    cout << "BIN  - DART will treat this file type the same way as .PRGs, without the first two header bytes.\n\n";
+    cout << "BIN  - DART will treat this file type the same way as PRGs, without the first two header bytes.\n\n";
     cout << "ASM  - KickAss ASM DirArt source file. Please refer to Chapter 11.6 in the Kick Assembler Reference Manual for\n";
     cout << "       details. The ASM file must only contain the file parameters within [] brackets, without disk parameters.\n";
     cout << "       DART only recognizes the name and type file parameters. Example:\n\n";
-    cout << "       [name = ""0123456789"", type = ""rel""],\n";
-    cout << "       [name = @""\\$75\\$69\\$75\\$69\\$B2\\$69\\$75\\$69\\$75\\$ae\\$B2\\$75\\$AE\\$20\\$20\\$20"", type=""del""]\n\n";
+    cout << "       [name = \"0123456789\", type = \"rel\"],\n";
+    cout << "       [name = @\"\\$75\\$69\\$75\\$69\\$B2\\$69\\$75\\$69\\$75\\$ae\\$B2\\$75\\$AE\\$20\\$20\\$20\", type=\"del\"]\n\n";
     cout << "C    - Marq's PETSCII Editor C array file. This file type can also be produced using Petmate. This is essentially a\n";
     cout << "       C source file which consists of a single unsigned char array declaration initialized with the dir entries.\n";
     cout << "       If present, DART will use the META: comment after the array to determine the dimensions of the DirArt.\n\n";
@@ -1823,9 +1811,11 @@ void ShowInfo()
     cout << "       file to determine the dimensions of the DirArt, but it will ignore the next three bytes (border and background\n";
     cout << "       colors, charset) as well as color RAM data. DART will import max. 16 chars per directory entry.\n\n";
     cout << "JSON - This format can be created using Petmate. DART will import max. 16 chars from each character row.\n\n";
-    cout << "PNG  - Portable Network Graphics image file. Image input files can only use a single foreground color. DART will use\n";
-    cout << "       the darker of the two colors as background color. Image width must be 128 pixels (16 characters), no borders\n";
-    cout << "       allowed. Image files must use the uppercase charset and their appearance cannot rely on command characters.\n\n";
+    cout << "PNG  - Portable Network Graphics image file. Image input files can only use two colors (background and foreground).\n";
+    cout << "       DART will try to identify the colors by looking for a space character. If none found, it will use the darker\n";
+    cout << "       of the two colors as background color. Image width must be exactly 16 characters (128 pixels or its multiples\n";
+    cout << "       if the image is resized) and the height must be multiples of 8 pixels. Borders are not allowed. Image files\n";
+    cout << "       must display the uppercase charset and their appearance cannot rely on command characters.\n\n";
     cout << "BMP  - Bitmap image file. Same rules and limitations as with PNGs.\n\n";
     cout << "Any other file type will be handled as a binary file and will be treated as PRGs without the first two header bytes.\n\n";
     cout << "Limitations:\n";
@@ -1860,7 +1850,7 @@ int main(int argc, char* argv[])
     {
 
     #ifdef DEBUG
-        InFileName = "c:\\Users\\Tamas\\OneDrive\\C64\\C++\\dart\\test\\Test_32bit.png";
+        InFileName = "c:\\Users\\Tamas\\OneDrive\\C64\\C++\\dart\\test\\Asm1.asm";
     #else
 
         cout << "Usage: dart input[*] [output.d64]\n\n";
