@@ -143,6 +143,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="common.h" />
+    <ClInclude Include="resource.h" />
     <ClInclude Include="thirdparty\lodepng.h" />
   </ItemGroup>
   <ItemGroup>
@@ -150,6 +151,10 @@
   </ItemGroup>
   <ItemGroup>
     <Image Include="dart.ico" />
+    <Image Include="dart.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="dart.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

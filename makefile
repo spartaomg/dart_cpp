@@ -7,7 +7,7 @@ create_dir = @mkdir -p $(@D)
 OBJ = $(DIR_OBJ)/dart.o $(DIR_OBJ)/ascii2dirart.o $(DIR_OBJ)/petscii2dirart.o $(DIR_OBJ)/pixelcnttab.o $(DIR_OBJ)/charsettab.o $(DIR_OBJ)/thirdparty/lodepng.o
 
 ifeq ($(OS),Windows_NT)
-	#OBJ += $(DIR_OBJ)/dart.res
+	OBJ += $(DIR_OBJ)/dart.res
 	EXEC = $(DIR_BIN)/dart.exe
 	LINKFLAGS = -static -static-libgcc -static-libstdc++ -s -std=c++17 -o
 else
@@ -34,6 +34,6 @@ $(DIR_OBJ)/thirdparty/%.o: thirdparty/%.cpp thirdparty/%.h
 	$(create_dir)
 	g++ $(CFLAGS) $< -o $@
 
-#$(DIR_OBJ)/dart.res: dart.rc resource.h
-#	$(create_dir)
-#	windres $(RESFLAGS) dart.rc -o $(DIR_OBJ)/dart.res
+$(DIR_OBJ)/dart.res: dart.rc resource.h
+	$(create_dir)
+	windres $(RESFLAGS) dart.rc -o $(DIR_OBJ)/dart.res
