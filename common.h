@@ -15,7 +15,7 @@
 #include <filesystem>
 #include <cmath>
 #include <math.h>
-#include "thirdparty\lodepng.h"
+#include "thirdparty/lodepng.h"
 
 using namespace std;
 
