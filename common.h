@@ -2,18 +2,18 @@
 
 #include <algorithm>
 #include <iostream>
-#include <string>
-#include <string.h>
-#include <array>
-#include <vector>
+//#include <string>
+//#include <string.h>
+//#include <array>
+//#include <vector>
 #include <fstream>
-#include <stdio.h>      /* printf, NULL */
-#include <stdlib.h>     /* srand, rand */
-#include <iomanip>
-#include <iostream>
-#include <sstream>
+//#include <stdio.h>      /* printf, NULL */
+//#include <stdlib.h>     /* srand, rand */
+//#include <iomanip>
+//#include <iostream>
+//#include <sstream>
 #include <filesystem>
-#include <cmath>
+//#include <cmath>
 #include <math.h>
 #include "thirdparty/lodepng.h"
 
