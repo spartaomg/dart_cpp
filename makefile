@@ -4,7 +4,7 @@ DIR_BIN = bin/release
 CFLAGS = -O3 -Wall -std=c++17 -fexceptions -c #-m32
 RESFLAGS = -J rc -O coff -i
 create_dir = @mkdir -p $(@D)
-OBJ = $(DIR_OBJ)/dart.o $(DIR_OBJ)/ascii2dirart.o $(DIR_OBJ)/petscii2dirart.o $(DIR_OBJ)/pixelcnttab.o $(DIR_OBJ)/charsettab.o $(DIR_OBJ)/thirdparty/lodepng.o
+OBJ = $(DIR_OBJ)/ascii2dirart.o $(DIR_OBJ)/charsettab.o $(DIR_OBJ)/dart.o $(DIR_OBJ)/petscii2dirart.o $(DIR_OBJ)/pixelcnttab.o $(DIR_OBJ)/thirdparty/lodepng.o
 
 ifeq ($(OS),Windows_NT)
 	OBJ += $(DIR_OBJ)/dart.res
