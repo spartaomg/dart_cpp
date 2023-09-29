@@ -1842,7 +1842,7 @@ int main(int argc, char* argv[])
 {
     cout << "\n";
     cout << "*********************************************************\n";
-    cout << "DART 1.3 - Directory Art Importer by Sparta (C) 2022-2023\n";
+    cout << "DART 1.2 - Directory Art Importer by Sparta (C) 2022-2023\n";
     cout << "*********************************************************\n";
     cout << "\n";
 
