@@ -1,5 +1,5 @@
 
-//#define DEBUG
+#define DEBUG
 
 #include "common.h"
 
@@ -7,14 +7,14 @@ const int StdDiskSize = (664 + 19) * 256;
 const int ExtDiskSize = StdDiskSize + (85 * 256);
 
 vector <unsigned char> Disk;
-vector <unsigned char> Image; //the raw pixels in RGBA format (4 bytes per pixel)
+vector <unsigned char> Image;   //pixels in RGBA format (4 bytes per pixel)
 vector <unsigned char> BmpRaw;
 
 string InFileName = "";
 string OutFileName = "";
 string DirEntry = "";
 string DirArt = "";
-string DirArtType = ".";
+string DirArtType = "";
 
 bool DirEntryAdded = false;
 bool AppendDir = false;
@@ -27,16 +27,6 @@ unsigned int ImgWidth = 0;
 unsigned int ImgHeight = 0;
 unsigned int BGCol = 0;
 unsigned int FGCol = 0;
-
-unsigned int BmpWidth = 0;
-unsigned int BmpHeight = 0;
-unsigned int BmpBitsPerPixel = 0;
-
-unsigned char *BmpPixels{};
-
-unsigned char BmpR[256]{};
-unsigned char BmpG[256]{};
-unsigned char BmpB[256]{};
 
 size_t DirTrack{}, DirSector{}, LastDirSector{};
 size_t Track[41]{};
@@ -208,7 +198,7 @@ int ReadBinaryFile(const string& FileName, vector<unsigned char>& prg)
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
-string ReadFileToString(const string& FileName, bool CorrectFilePath)
+string ReadFileToString(const string& FileName, bool CorrectFilePath = false)
 {
 
     if (!fs::exists(FileName))
@@ -231,15 +221,15 @@ string ReadFileToString(const string& FileName, bool CorrectFilePath)
 
     str.assign((istreambuf_iterator<char>(t)), istreambuf_iterator<char>());
 
-    for (size_t i = 0; i < str.size(); i++)
+    for (int i = str.length() - 1; i >= 0; i--)        //Do this backwards - we may shorten the string the string
     {
         if (str[i] == '\r')
         {
-            str.replace(i, 1, "");      //Windows does this automatically, remove '\r' (0x0d) chars if string contains any
+            str.replace((size_t)i, 1, "");      //Windows does this automatically, remove '\r' (0x0d) chars if string contains any
         }
-        else if ((str[i] == '\\') && (CorrectFilePath))
+        else if ((CorrectFilePath) && (str[i] == '\\'))
         {
-            str.replace(i, 1, "/");     //Replace '\' with '/' in file paths, Windows can also handle this
+            str.replace((size_t)i, 1, "/");     //Replace '\' with '/' in file paths, Windows can also handle this
         }
     }
 
@@ -278,30 +268,6 @@ void DeleteBit(size_t T, size_t S)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
-/*
-void FindNextDirSector() {
-
-    int LastDirSector = DirSector;
-
-    if (DirSector < 6)
-    {
-        DirSector++;
-
-        Disk[Track[DirTrack] + (LastDirSector * 256)] = DirTrack;
-        Disk[Track[DirTrack] + (LastDirSector * 256) + 1] = DirSector;
-
-        Disk[Track[DirTrack] + (DirSector * 256)] = 0;
-        Disk[Track[DirTrack] + (DirSector * 256) + 1] = 255;
-
-        DeleteBit(DirTrack, DirSector);
-    }
-    else
-    {
-        DirSector = 0;
-    }
-}
-*/
-//----------------------------------------------------------------------------------------------------------------------------------------------------------
 
 void FindNextEmptyDirSector()
 {
@@ -393,8 +359,10 @@ void FindNextDirPos() {
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------------
+//  IMPORT FROM D64
+//----------------------------------------------------------------------------------------------------------------------------------------------------
 
-bool ConvertD64ToDirArt()
+bool ImportFromD64()
 {
 
     vector <unsigned char> DA;
@@ -459,6 +427,8 @@ bool ConvertD64ToDirArt()
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
+//  IMPORT FROM TXT
+//----------------------------------------------------------------------------------------------------------------------------------------------------
 
 void AddDirEntry(string DirEntry) {
 
@@ -486,10 +456,10 @@ void AddDirEntry(string DirEntry) {
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
-bool ConvertTxtToDirArt()
+bool ImportFromTxt()
 {
 
-    string DirArt = ReadFileToString(InFileName, false);
+    string DirArt = ReadFileToString(InFileName);
 
     if (DirArt == "")
     {
@@ -527,8 +497,10 @@ bool ConvertTxtToDirArt()
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
+//  IMPORT FROM PRG AND OTHER BINARY
+//----------------------------------------------------------------------------------------------------------------------------------------------------
 
-bool ConvertBinToDirArt(string DirArtType) {
+bool ImportFromBinary() {
 
     vector<unsigned char> DA;
 
@@ -543,7 +515,7 @@ bool ConvertBinToDirArt(string DirArtType) {
         return false;
     }
 
-    size_t DAPtr = (DirArtType == ".prg") ? 2 : 0;
+    size_t DAPtr = (DirArtType == "prg") ? 2 : 0;
     size_t EntryStart = DAPtr;
     while (DAPtr <= DA.size())
     {
@@ -596,6 +568,8 @@ bool ConvertBinToDirArt(string DirArtType) {
     return true;
 }
 
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+//  IMPORT FROM C
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
 bool AddCArrayDirEntry(int RowLen)
@@ -731,9 +705,9 @@ bool AddCArrayDirEntry(int RowLen)
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
-bool ConvertCArrayToDirArt() {
+bool ImportFromCArray() {
 
-    string DA = ReadFileToString(InFileName, false);
+    string DA = ReadFileToString(InFileName);
 
     if (DA == "")
     {
@@ -823,6 +797,8 @@ bool ConvertCArrayToDirArt() {
     return true;
 }
 
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+//  IMPORT FROM ASM
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
 void AddAsmDirEntry(string DirEntry) {
@@ -1009,10 +985,10 @@ void AddAsmDirEntry(string DirEntry) {
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
-bool ConvertKickassAsmToDirArt()
+bool ImportFromAsm()
 {
 
-    DirArt = ReadFileToString(InFileName, false);
+    DirArt = ReadFileToString(InFileName);
 
     if (DirArt == "")
     {
@@ -1055,6 +1031,8 @@ bool ConvertKickassAsmToDirArt()
     return true;
 }
 
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+//  IMPORT FROM PET
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
 bool ConvertPetToDirArt()
@@ -1117,11 +1095,12 @@ bool ConvertPetToDirArt()
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
+//  IMPORT FROM JSON
+//----------------------------------------------------------------------------------------------------------------------------------------------------
 
-bool ConvertJsonToDirArt()
+bool ImportFromJson()
 {
-    
-    DirArt = ReadFileToString(InFileName,(false));
+    DirArt = ReadFileToString(InFileName);
 
     if (DirArt == "")
     {
@@ -1199,7 +1178,6 @@ bool ConvertJsonToDirArt()
                 ScreenCodes[p++] = ConvertHexStringToInt(B);
             }
         }
-
         
         //Last screen code, after asr comma
         if (IsNumeric(S))
@@ -1246,6 +1224,8 @@ bool ConvertJsonToDirArt()
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
+//  IMPORT FROM IMAGE
+//----------------------------------------------------------------------------------------------------------------------------------------------------
 
 unsigned int GetPixel(size_t X, size_t Y)
 {
@@ -1287,54 +1267,48 @@ bool IdentyfyColors()
         }
     }
 
+    //Start with same colors
+    FGCol = Col1;
+    BGCol = Col1;
+
+    //First let's try to find a SPACE character -> its color will be the background color
+    
+    for (size_t cy = 0; cy < ImgHeight; cy += ((size_t)Mplr * 8))
+    {
+        for (size_t cx = 0; cx < ImgWidth; cx += ((size_t)Mplr * 8))
+        {
+            int PixelCnt = 0;
+            
+            unsigned int FirstCol = GetPixel(cx, cy);
+    
+            for (size_t y = 0; y < (size_t)Mplr * 8; y += (size_t)Mplr)
+            {
+                for (size_t x = 0; x < (size_t)Mplr * 8; x += (size_t)Mplr)
+                {
+                    if (GetPixel(cx + x, cy + y) == FirstCol)
+                    {
+                        PixelCnt++;
+                    }
+                }
+            }
+            if (PixelCnt == 64)         //SPACE character found (i.e. all 64 pixels are the same color - the opposite (0xa0) is not allowed in dirart)
+            {
+                BGCol = FirstCol;
+                FGCol = (BGCol == Col1) ? Col2 : Col1;
+                return true;
+            }
+        }//End cx
+    }//End cy
+
     bool Simple = true;
 
     if (!Simple)
     {
-        //Start with same colors
-        FGCol = Col1;
-        BGCol = Col1;
-
-        int PixelCnt = 0;
-        for (size_t cy = 0; cy < ImgHeight; cy += ((size_t)Mplr * 8))
-        {
-            for (size_t cx = 0; cx < ImgWidth; cx += ((size_t)Mplr * 8))
-            {
-                PixelCnt = 0;
-                unsigned int FirstCol = GetPixel(cx, cy);
-                for (size_t y = 0; y < (size_t)Mplr * 8; y += (size_t)Mplr)
-                {
-                    for (size_t x = 0; x < (size_t)Mplr * 8; x += (size_t)Mplr)
-                    {
-                        if (GetPixel(cx + x, cy + y) == FirstCol)
-                        {
-                            PixelCnt++;
-                        }
-                    }
-                }
-                if (PixelCnt == 64)
-                {
-                    BGCol = FirstCol;
-                    FGCol = (BGCol = Col1) ? Col2 : Col1;
-                    break;
-                }
-            }//End cx
-            if (PixelCnt == 64)
-            {
-                break;
-            }
-        }//End cy
-
-        if (FGCol != BGCol)
-        {
-            return true;
-        }
-
-        //No SPACE found in DirArt PNG, now check low and high density pixels
-
+        //No SPACE found in DirArt image, now check the distribution of low and high density pixels (i.e. pixels that have the highest chance to be eighter BG of FG color)
+        //THIS IS NOT USED AS THE DISTRIBUTION OF THE INDIVIDUAL CHARACTERS CANNOT BE PREDICTED
         int LoPx = 0;
         int HiPx = 0;
-       
+
         for (size_t cy = 0; cy < ImgHeight; cy += (size_t)Mplr * 8)
         {
             for (size_t cx = 0; cx < ImgWidth; cx += (size_t)Mplr * 8)
@@ -1355,7 +1329,7 @@ bool IdentyfyColors()
 
             }//End cx
         }//End cy
-    
+
         if (LoPx > HiPx)
         {
             BGCol = Col1;
@@ -1371,11 +1345,9 @@ bool IdentyfyColors()
         {
             return true;
         }
-    }   //End Simple
+    }
 
-
-    //Same distribution of low density and high density pixels :(
-    //Let's simply use darker color as BGCol
+    //Let's use the darker color as BGCol
     int R1 = Col1 / 0x1000000;
     int G1 = Col1 / 0x10000;
     int B1 = Col1 / 0x100;
@@ -1387,31 +1359,20 @@ bool IdentyfyColors()
     double C2 = sqrt((0.21 * R2 * R2) + (0.72 * G2 * G2) + (0.07 * B2 * B2));
     //Another formula: sqrt(0.299 * R ^ 2 + 0.587 * G ^ 2 + 0.114 * B ^ 2)
 
-    if (C1 < C2)
-    {
-        BGCol = Col1;
-        FGCol = Col2;
-    }
-    else
-    {
-        BGCol = Col2;
-        FGCol = Col1;
-    }
+    BGCol = (C1 < C2) ? Col1 : Col2;
+    FGCol = (BGCol == Col1) ? Col2 : Col1;
 
     return true;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
-#define DATA_OFFSET_OFFSET 0x000A
-#define BIH_OFFSET 0x00E
-//#define WIDTH_OFFSET 0x0012
-//##define HEIGHT_OFFSET 0x0016
-//#define BITS_PER_PIXEL_OFFSET 0x001C
-
 bool DecodeBmp()
 {
-    memcpy(&BmpInfoHeader, &BmpRaw[BIH_OFFSET], sizeof(BmpInfoHeader));
+    const size_t BIH = 0x0e;            //Bitmap Info Header pointer within raw data
+    const size_t DATA_OFFSET = 0x0a;    //Bitmap data offset pointer within raw data
+
+    memcpy(&BmpInfoHeader, &BmpRaw[BIH], sizeof(BmpInfoHeader));
 
     if (BmpInfoHeader.biWidth % 128 != 0)
     {
@@ -1434,61 +1395,50 @@ bool DecodeBmp()
     }
 
     PBITMAPINFO BmpInfo = (PBITMAPINFO)new char[sizeof(BITMAPINFOHEADER) + (ColMax * sizeof(RGBQUAD))];
-
+    
+    //Copy info header into structure
     memcpy(&BmpInfo->bmiHeader, &BmpInfoHeader, sizeof(BmpInfoHeader));
     
+    //Copy palette into structure
     for (size_t i = 0; i < (size_t)ColMax; i++)
     {
         memcpy(&BmpInfo->bmiColors[i], &BmpRaw[0x36 + (i * 4)], sizeof(RGBQUAD));
     }
 
-    size_t DataOffset = (size_t)BmpRaw[DATA_OFFSET_OFFSET] + (size_t)(BmpRaw[DATA_OFFSET_OFFSET + 1] * 0x100) + (size_t)(BmpRaw[DATA_OFFSET_OFFSET + 2] * 0x10000) + (size_t)(BmpRaw[DATA_OFFSET_OFFSET + 3] * 01000000);
+    //Calculate data offset
+    size_t DataOffset = (size_t)BmpRaw[DATA_OFFSET] + (size_t)(BmpRaw[DATA_OFFSET + 1] * 0x100) + (size_t)(BmpRaw[DATA_OFFSET + 2] * 0x10000) + (size_t)(BmpRaw[DATA_OFFSET + 3] * 01000000);
 
-    size_t RowLen = BmpInfo->bmiHeader.biWidth / (double)((double)8 / BmpInfo->bmiHeader.biBitCount);       //256/(8/1)=32
-    size_t PaddedRowLen = (RowLen % 4) == 0 ? RowLen : RowLen - (RowLen % 4) + 4;           //32
+    //Calculate length of pixel rows in bytes
+    size_t RowLen = ((size_t)BmpInfo->bmiHeader.biWidth * (size_t)BmpInfo->bmiHeader.biBitCount) / 8;
+    
+    //BMP pads pixel rows to multiples of 4 in bytes
+    size_t PaddedRowLen = (RowLen % 4) == 0 ? RowLen : RowLen - (RowLen % 4) + 4;
 
-    size_t BmpSize = BmpInfo->bmiHeader.biWidth * 4 * BmpInfo->bmiHeader.biHeight;          //256*704*4=720896
-    Image.resize(BmpSize);
+    //Calculate size of our image vector (we will use 4 bytes per pixel in RGBA format)
+    size_t BmpSize = (size_t)BmpInfo->bmiHeader.biWidth * 4 * (size_t)BmpInfo->bmiHeader.biHeight;
+    
+    //Resize image vector
+    Image.resize(BmpSize, 0);
 
     size_t BmpOffset = 0;
 
-    if (ColMax != 0)
+    if (ColMax != 0)    //1 bit/pixel, 4 bits/pixel, 8 bits/pixel modes - use palette data
     {
-        //Use Palette Data
-        for (int y = (BmpInfo->bmiHeader.biHeight - 1); y >= 0; y--)
+        int BitsPerPx = BmpInfo->bmiHeader.biBitCount;   //1         4          8
+        int bstart = 8 - BitsPerPx;                      //1-bit: 7; 4-bit:  4; 8-bit =  0;
+        int mod = 1 << BitsPerPx;                        //1-bit: 2; 4-bit: 16; 8-bit: 256;
+
+        for (int y = (BmpInfo->bmiHeader.biHeight - 1); y >= 0; y--)    //Pixel rows are read from last bitmap row to first
         {
-            size_t RowOffset = DataOffset + (y * PaddedRowLen);                             //62 + (703*32) = 22558
-            for (size_t x = 0; x < RowLen; x++)
+            size_t RowOffset = DataOffset + (y * PaddedRowLen);
+
+            for (size_t x = 0; x < RowLen; x++)                         //Pixel row are read left to right
             {
                 unsigned int Pixel = BmpRaw[RowOffset + x];
 
-                if (ColMax == 2)
+                for (int b = bstart; b >= 0; b -= BitsPerPx)
                 {
-                    for (int b = 7; b >= 0; b--)
-                    {   //2 colors
-                        int PaletteIndex = (Pixel >> b) % 2;
-
-                        Image[BmpOffset + 0] = BmpInfo->bmiColors[PaletteIndex].rgbRed;
-                        Image[BmpOffset + 1] = BmpInfo->bmiColors[PaletteIndex].rgbGreen;
-                        Image[BmpOffset + 2] = BmpInfo->bmiColors[PaletteIndex].rgbBlue;
-                        BmpOffset += 4;
-                    }
-                }
-                else if (ColMax == 16)
-                {
-                    for (int b = 4; b >= 0; b -= 4)
-                    {   //16 colors
-                        int PaletteIndex = (Pixel >> b) % 16;
-
-                        Image[BmpOffset + 0] = BmpInfo->bmiColors[PaletteIndex].rgbRed;
-                        Image[BmpOffset + 1] = BmpInfo->bmiColors[PaletteIndex].rgbGreen;
-                        Image[BmpOffset + 2] = BmpInfo->bmiColors[PaletteIndex].rgbBlue;
-                        BmpOffset += 4;
-                    }
-                }
-                else
-                {   //256 colors
-                    int PaletteIndex = Pixel;
+                    int PaletteIndex = (Pixel >> b) % mod;
 
                     Image[BmpOffset + 0] = BmpInfo->bmiColors[PaletteIndex].rgbRed;
                     Image[BmpOffset + 1] = BmpInfo->bmiColors[PaletteIndex].rgbGreen;
@@ -1498,49 +1448,23 @@ bool DecodeBmp()
             }
         }
     }
-    else if (BmpInfo->bmiHeader.biBitCount == 24)
-    {
-        //No Palette
-        for (int y = (BmpInfo->bmiHeader.biHeight - 1); y >= 0; y--)
-        {
-            size_t RowOffset = DataOffset + (y * PaddedRowLen);                             //62 + (703*32) = 22558
-            for (size_t x = 0; x < (RowLen / 3); x++)
-            {
-                Image[BmpOffset + 0] = BmpRaw[RowOffset + (x * 3) + 2];
-                Image[BmpOffset + 1] = BmpRaw[RowOffset + (x * 3) + 1];
-                Image[BmpOffset + 2] = BmpRaw[RowOffset + (x * 3) + 0];
-                BmpOffset += 4;
-            }
-        }
-    }
     else
     {
-        //No Palette
-        for (int y = (BmpInfo->bmiHeader.biHeight - 1); y >= 0; y--)
+        int BytesPerPx = BmpInfo->bmiHeader.biBitCount / 8;    //24 bits/pixel: 3; 32 bits/pixel: 4
+
+        for (int y = (BmpInfo->bmiHeader.biHeight - 1); y >= 0; y--)    //Pixel rows are read from last bitmap row to first
         {
-            size_t RowOffset = DataOffset + (y * PaddedRowLen);                             //62 + (703*32) = 22558
-            for (size_t x = 0; x < (RowLen / 4); x++)
+            size_t RowOffset = DataOffset + (y * PaddedRowLen);
+            
+            for (size_t x = 0; x < RowLen; x += BytesPerPx)              //Pixel row are read left to right
             {
-                Image[BmpOffset + 0] = BmpRaw[RowOffset + (x * 4) + 2];
-                Image[BmpOffset + 1] = BmpRaw[RowOffset + (x * 4) + 1];
-                Image[BmpOffset + 2] = BmpRaw[RowOffset + (x * 4) + 0];
+                Image[BmpOffset + 0] = BmpRaw[RowOffset + x + 2];
+                Image[BmpOffset + 1] = BmpRaw[RowOffset + x + 1];
+                Image[BmpOffset + 2] = BmpRaw[RowOffset + x + 0];
                 BmpOffset += 4;
             }
         }
     }
-    /*
-            ofstream myFile(OutFileName + ".BMP", ios::out | ios::binary);
-
-            if (myFile.is_open())
-            {
-                cout << "Writing " + OutFileName + ".BMP...\n";
-                myFile.write((char*)&Image[0], BmpSize);
-                cout << "Done!\n";
-                return true;
-            }
-    */
-
-    Mplr = BmpInfo->bmiHeader.biWidth / 128;
 
     ImgWidth = BmpInfo->bmiHeader.biWidth;
     ImgHeight = BmpInfo->bmiHeader.biHeight;
@@ -1550,11 +1474,11 @@ bool DecodeBmp()
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
-bool ConvertImgToDirArt()
+bool ImportFromImage()
 {
-    if (DirArtType == ".png")
+    if (DirArtType == "png")
     {
-        //Load and decode PNG image
+        //Load and decode PNG image using LodePNG (Copyright (c) 2005-2023 Lode Vandevenne)
         unsigned error = lodepng::decode(Image, ImgWidth, ImgHeight, InFileName);
 
         //if there's an error, display it
@@ -1570,10 +1494,8 @@ bool ConvertImgToDirArt()
             return false;
         }
 
-        Mplr = ImgWidth / 128;
-
     }
-    else if (DirArtType == ".bmp")
+    else if (DirArtType == "bmp")
     {
         ReadBinaryFile(InFileName, BmpRaw);
 
@@ -1582,6 +1504,9 @@ bool ConvertImgToDirArt()
             return false;
         }
     }
+    //Here we have the image decoded in Image vector of unsigned chars, 4 bytes representing a pixel in RGBA format
+
+    Mplr = ImgWidth / 128;
 
     if (!IdentyfyColors())
     {
@@ -1684,7 +1609,6 @@ void FindLastUsedDirPos()
     //First find the last used sector
     while ((Disk[Track[DirTrack] + (DirSector * 256) + 0] == 18) && (Disk[Track[DirTrack] + (DirSector * 256) + 1] != 0) && (Disk[Track[DirTrack] + (DirSector * 256) + 1] != 255))
     {
-        //unsigned char T = Disk[Track[DirTrack] + (DirSector * 256) + 0];
         unsigned char S = Disk[Track[DirTrack] + (DirSector * 256) + 1];
 
         //DirTrack = T        'DART assumes that we keep the directory on track 18...
@@ -1695,7 +1619,7 @@ void FindLastUsedDirPos()
     Disk[Track[DirTrack] + (DirSector * 256) + 0] = 0;
     Disk[Track[DirTrack] + (DirSector * 256) + 1] = 255;
 
-    //Then find last used dir slot
+    //Then find last used dir entry slot
     DirPos = (7 * 32) + 2;
 
     while (Disk[Track[DirTrack] + (DirSector * 256) + DirPos] == 0)
@@ -1705,7 +1629,6 @@ void FindLastUsedDirPos()
         {
             DirPos = 0;
             break;
-
         }
     }
 }
@@ -1714,11 +1637,9 @@ void FindLastUsedDirPos()
 
 void FixSparkleBAM()
 {
-    //Sparkle disks don't mark DirArt sectors as "used". So let's follow the directory block chain and mark them off
+    //Earlier versions of Sparkle disks don't mark DirArt sectors as "used". So let's follow the directory block chain and mark them off
     DirTrack = 18;
     DirSector = 1;
-    //unsigned char NextT = 0;
-    //unsigned char NextS = 0;
 
     while (Disk[Track[DirTrack] + (DirSector * 256)] != 0)
     {
@@ -1741,7 +1662,7 @@ void FixSparkleBAM()
     Disk[Track[DirTrack] + (DirSector * 256) + 0] = 0;
     Disk[Track[DirTrack] + (DirSector * 256) + 1] = 0xff;
 
-    //Sparkle 2+ disks don't mark the shadow directory sectors (18:17 and 18:18) off, let's fix it.
+    //Sparkle 2 and 2.1 disks don't mark the internal directory sectors (18:17 and 18:18) off, let's fix it.
     //Sparkle 2.0 dir(0) = $f7 $ff $73 $00
     //Sparkle 2.1 dir(0) = $77 $7f $63 $00 
     
@@ -1756,7 +1677,7 @@ void FixSparkleBAM()
         (Disk[Track[DirTrack] + (DirSector * 256) + 254] == 0x63) &&
         (Disk[Track[DirTrack] + (DirSector * 256) + 253] == 0x00)))
     {
-        //Sparkle 2.0 or Sparkle 2.1+ disk -> mark 18:17 and 18:18 off (shadow directory sectors)
+        //Sparkle 2.0 or Sparkle 2.1+ disk -> mark 18:17 and 18:18 off (internal directory sectors)
         DeleteBit(18, 17);
         DeleteBit(18, 18);
     }
@@ -1766,8 +1687,6 @@ void FixSparkleBAM()
 
 void CreateDisk()
 {
-    //unsigned char B=0;
-    //int Cnt=0;
     size_t CP = Track[18];
     
     DiskSize = StdDiskSize;
@@ -1814,14 +1733,11 @@ void CreateDisk()
 
     Disk[CP + ((size_t)18 * 4) + 0] = 18;
     Disk[CP + ((size_t)18 * 4) + 1] = 252;
-
-    //Disk[CP + 256 + 1] = 0xff; //This marks the sector used, but it is still unused at this stage, so it's not needed!!!
-
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
-void CreateTables()
+void CreateTrackTable()
 {
 
     Track[1] = 0;
@@ -1867,7 +1783,6 @@ void CorrectFilePathSeparators()
             OutFileName.replace(i, 1, "/");     //Replace '\' with '/' in file paths, Windows can also handle this
         }
     }
-
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
@@ -1885,8 +1800,8 @@ void ShowInfo()
     cout << "The [output.d64] parameter is optional. If not specified, DART will create an input_out.d64 file.\n\n";
     cout << "Accepted input file types:\n";
     cout << "--------------------------\n";
-    cout << ".D64 - DART will import all directory entries from the input file to the output file.\n\n";
-    cout << ".PRG - DART accepts two file formats: screen RAM grabs (40-byte long char rows of which the first 16 is used as dir\n";
+    cout << "D64  - DART will import all directory entries from the input file to the output file.\n\n";
+    cout << "PRG  - DART accepts two file formats: screen RAM grabs (40-byte long char rows of which the first 16 is used as dir\n";
     cout << "       entries, can be more than 25 char rows long) and $a0 byte terminated directory entries*. If an $a0 byte is not\n";
     cout << "       detected sooner, then 16 bytes are imported per directory entry. DART then skips up to 24 bytes or until an\n";
     cout << "       $a0 byte detected. Example source code for $a0-terminated .PRG (KickAss format, must be compiled):\n\n";
@@ -1894,24 +1809,24 @@ void ShowInfo()
     cout << "       .text ""hello world!""   // This will be upper case once compiled\n";
     cout << "       .byte $a0              // Terminates directory entry\n";
     cout << "       .byte $30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$01,$02,$03,$04,$05,$06,$a0\n\n";
-    cout << "       *Char code $a0 (inverted space) is also used in standard directories to mark the end of entries on the disk.\n\n";
-    cout << ".BIN - DART will treat this file type the same way as .PRGs, without the first two header bytes.\n\n";
-    cout << ".ASM - KickAss ASM DirArt source file. Please refer to Chapter 11.6 in the Kick Assembler Reference Manual for\n";
+    cout << "       *Char code $a0 (inverted space) is also used in standard directories to mark the end of entries.\n\n";
+    cout << "BIN  - DART will treat this file type the same way as .PRGs, without the first two header bytes.\n\n";
+    cout << "ASM  - KickAss ASM DirArt source file. Please refer to Chapter 11.6 in the Kick Assembler Reference Manual for\n";
     cout << "       details. The ASM file must only contain the file parameters within [] brackets, without disk parameters.\n";
     cout << "       DART only recognizes the name and type file parameters. Example:\n\n";
     cout << "       [name = ""0123456789"", type = ""rel""],\n";
     cout << "       [name = @""\\$75\\$69\\$75\\$69\\$B2\\$69\\$75\\$69\\$75\\$ae\\$B2\\$75\\$AE\\$20\\$20\\$20"", type=""del""]\n\n";
-    cout << ".C   - Marq's PETSCII Editor C array file. This file type can also be produced using Petmate. This is essentially a\n";
+    cout << "C    - Marq's PETSCII Editor C array file. This file type can also be produced using Petmate. This is essentially a\n";
     cout << "       C source file which consists of a single unsigned char array declaration initialized with the dir entries.\n";
     cout << "       If present, DART will use the META: comment after the array to determine the dimensions of the DirArt.\n\n";
-    cout << ".PET - This format is supported by Marq's PETSCII Editor and Petmate. DART will use the first two bytes of the input\n";
+    cout << "PET  - This format is supported by Marq's PETSCII Editor and Petmate. DART will use the first two bytes of the input\n";
     cout << "       file to determine the dimensions of the DirArt, but it will ignore the next three bytes (border and background\n";
     cout << "       colors, charset) as well as color RAM data. DART will import max. 16 chars per directory entry.\n\n";
-    cout << ".JSON- This format can be created using Petmate. DART will import max. 16 chars from each character row.\n\n";
-    cout << ".PNG - Portable Network Graphics image file. Image input files can only use a single foreground color. DART will use\n";
+    cout << "JSON - This format can be created using Petmate. DART will import max. 16 chars from each character row.\n\n";
+    cout << "PNG  - Portable Network Graphics image file. Image input files can only use a single foreground color. DART will use\n";
     cout << "       the darker of the two colors as background color. Image width must be 128 pixels (16 characters), no borders\n";
     cout << "       allowed. Image files must use the uppercase charset and their appearance cannot rely on command characters.\n\n";
-    cout << ".BMP - Bitmap image file. Same rules and limitations as with PNGs.\n\n";
+    cout << "BMP  - Bitmap image file. Same rules and limitations as with PNGs.\n\n";
     cout << "Any other file type will be handled as a binary file and will be treated as PRGs without the first two header bytes.\n\n";
     cout << "Limitations:\n";
     cout << "------------\n";
@@ -1935,42 +1850,17 @@ void ShowInfo()
 
 int main(int argc, char* argv[])
 {
-    cout << "\n*********************************************************\n";
-    cout << "DART 1.3 - Directory Art Importer by Sparta (C) 2022-2023" << "\n";
-    cout << "*********************************************************\n\n";
-/*
-    #if _WIN32
+    cout << "\n";
+    cout << "*********************************************************\n";
+    cout << "DART 1.3 - Directory Art Importer by Sparta (C) 2022-2023\n";
+    cout << "*********************************************************\n";
+    cout << "\n";
 
-    string AppPath{ fs::current_path().string() };
-
-    if (AppPath[AppPath.size() - 1] != '\\')
-    AppPath += "\\";
-
-    #elif __APPLE__ || __linux__
-
-    //Identify user's Home directory
-    char const* tmp = getenv("HOME");
-    if (tmp != NULL)
-    {
-        HomeDir = tmp;
-    }
-
-    string AppPath{ fs::current_path().string() };
-    if (AppPath[AppPath.size() - 1] != '/')
-    AppPath += "/";
-
-    #else
-
-    cerr << "***CRITICAL***\tUnsupported operating system!\n";
-    return EXIT_FAILURE;
-
-    #endif
-*/
     if (argc == 1)
     {
 
     #ifdef DEBUG
-        InFileName = "c:\\Users\\Tamas\\OneDrive\\C64\\C++\\dart\\test\\Test_2bit.bmp";
+        InFileName = "c:\\Users\\Tamas\\OneDrive\\C64\\C++\\dart\\test\\Test_32bit.png";
     #else
 
         cout << "Usage: dart input[*] [output.d64]\n\n";
@@ -2014,8 +1904,9 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
-    CreateTables();
-
+    CreateTrackTable();
+    
+    //Find the input file's extension
     int ExtStart = InFileName.length();
 
     for (int i = InFileName.length() - 1; i >= 0; i--)
@@ -2023,6 +1914,7 @@ int main(int argc, char* argv[])
 #if _WIN32
         if ((InFileName[i] == '\\') || (InFileName[i] == '/'))
         {
+            //We've reached a path separator before a "." -> no extension
             break;
         }
         else if (InFileName[i] == '.')
@@ -2033,6 +1925,7 @@ int main(int argc, char* argv[])
 #elif __APPLE__ || __linux__
         if (InFileName[i] == '/')
         {
+            //We've reached a path separator before a "." -> no extension
             break;
         }
         else if (InFileName[i] == '.')
@@ -2050,18 +1943,20 @@ int main(int argc, char* argv[])
 
     if (OutFileName == "")
     {
-        OutFileName = InFileName.substr(0, InFileName.size() - DirArtType.size()) + "_out.d64";
+        //Output file name not provided, use input file name without its extension to create output d64 file name
+        OutFileName = InFileName.substr(0, InFileName.size() - DirArtType.size() - 1) + "_out.d64";
     }
 
     CorrectFilePathSeparators();        //Replace "\" with "/" which is recognized by Windows as well
 
-    DiskSize = ReadBinaryFile(OutFileName, Disk);
+    DiskSize = ReadBinaryFile(OutFileName, Disk);   //Load the output file if it exists
 
     if (DiskSize < 0)
     {
+        //Output file doesn't exits, create an empty D64
         CreateDisk();
     }
-    else if ((DiskSize != StdDiskSize) && (DiskSize != ExtDiskSize))
+    else if ((DiskSize != StdDiskSize) && (DiskSize != ExtDiskSize))    //Otherwise make sure the output disk is the correct size
     {
         cerr << "***CRITICAL***\t Invalid output disk file size!\n";
         return EXIT_FAILURE;
@@ -2084,64 +1979,64 @@ int main(int argc, char* argv[])
         cout << "Import mode: Overwrite\n";
     }
 
-    if (DirArtType == ".d64")
+    if (DirArtType == "d64")
     {
-        cout <<"Importing DirArt from .D64...\n";
-        if (!ConvertD64ToDirArt())
+        cout <<"Importing DirArt from D64...\n";
+        if (!ImportFromD64())               //Import from another D64
             return EXIT_FAILURE;
     }
-    else if (DirArtType == ".txt")
+    else if (DirArtType == "txt")
     {
         cout << "Importing DirArt from text file...\n";
-        if (!ConvertTxtToDirArt())                  //Import a simple text file, 16 characters per text line
+        if (!ImportFromTxt())               //Import from a text file, 16 characters per text line
             return EXIT_FAILURE;
     }
-    else if (DirArtType == ".prg")
+    else if (DirArtType == "prg")
     {
-        cout << "Importing DirArt from .PRG...\n";
-        if (!ConvertBinToDirArt(DirArtType))        //Import from a PRG file, first 16 bytes from each 40
+        cout << "Importing DirArt from PRG...\n";
+        if (!ImportFromBinary())            //Import from a PRG file, first 16 bytes from each 40, or until 0xa0 charaxter found
             return EXIT_FAILURE;
     }
-    else if (DirArtType == ".c")
+    else if (DirArtType == "c")
     {
         cout << "Importing DirArt from Marq's PETSCII Editor C array file...\n";
-        if (!ConvertCArrayToDirArt())                //Import from Marq's PETSCII Editor C array file to D64
+        if (!ImportFromCArray())            //Import from Marq's PETSCII Editor C array file to D64
             return EXIT_FAILURE;
     }
-    else if (DirArtType == ".asm")
+    else if (DirArtType == "asm")
     {
-        cout << "Importing DirArt from KickAss .ASM source...\n";
-        if (!ConvertKickassAsmToDirArt())              //Import KickAss ASM dirart file to D64
+        cout << "Importing DirArt from KickAss ASM source...\n";
+        if (!ImportFromAsm())               //Import KickAss ASM dirart file to D64
             return EXIT_FAILURE;
     }
-    else if (DirArtType == ".json")
+    else if (DirArtType == "json")
     {
-        cout << "Importing DirArt from .JSON source...\n";
-        if (!ConvertJsonToDirArt())
+        cout << "Importing DirArt from JSON source...\n";
+        if (!ImportFromJson())              //Import from a JSON file
             return EXIT_FAILURE;
     }
-    else if (DirArtType == ".pet")
+    else if (DirArtType == "pet")
     {
-        cout << "Importing DirArt from .PET source...\n";
-        if (!ConvertPetToDirArt())
+        cout << "Importing DirArt from PET source...\n";
+        if (!ConvertPetToDirArt())          //Import from PET binary
             return EXIT_FAILURE;
     }
-    else if (DirArtType == ".png")
+    else if (DirArtType == "png")
     {
-        cout << "Importing DirArt from .PNG image...\n";
-        if (!ConvertImgToDirArt())
+        cout << "Importing DirArt from PNG image...\n";
+        if (!ImportFromImage())             //Import from PNG image using LodePNG (Copyright (c) 2005-2023 Lode Vandevenne)
             return EXIT_FAILURE;
     }
-    else if (DirArtType == ".bmp")
+    else if (DirArtType == "bmp")
     {
-        cout << "Importing DirArt from .BMP image...\n";
-        if (!ConvertImgToDirArt())
+        cout << "Importing DirArt from BMP image...\n";
+        if (!ImportFromImage())             //Import from BMP image
             return EXIT_FAILURE;
     }
     else
     {
         cout << "Importing DirArt from binary file...\n";
-        if (!ConvertBinToDirArt(""))                    //Import from any other file, first 16 bytes of each 40
+        if (!ImportFromBinary())          //Import from any other file, first 16 bytes of each 40 or until 0xa0 character found
             return EXIT_FAILURE;
     }
     
@@ -2151,7 +2046,6 @@ int main(int argc, char* argv[])
     }
 
     return EXIT_SUCCESS;
-
 }
     
 
