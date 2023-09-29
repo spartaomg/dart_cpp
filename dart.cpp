@@ -7,24 +7,68 @@ const int StdDiskSize = (664 + 19) * 256;
 const int ExtDiskSize = StdDiskSize + (85 * 256);
 
 vector <unsigned char> Disk;
+vector <unsigned char> Image; //the raw pixels in RGBA format (4 bytes per pixel)
+vector <unsigned char> BmpRaw;
 
 string InFileName = "";
 string OutFileName = "";
 string DirEntry = "";
 string DirArt = "";
+string DirArtType = ".";
 
 bool DirEntryAdded = false;
 bool AppendDir = false;
 
 int DirPos = 0;
 int DiskSize = 0;
+int Mplr = 0;
+
+unsigned int ImgWidth = 0;
+unsigned int ImgHeight = 0;
+unsigned int BGCol = 0;
+unsigned int FGCol = 0;
+
+unsigned int BmpWidth = 0;
+unsigned int BmpHeight = 0;
+unsigned int BmpBitsPerPixel = 0;
+
+unsigned char *BmpPixels{};
+
+unsigned char BmpR[256]{};
+unsigned char BmpG[256]{};
+unsigned char BmpB[256]{};
 
 size_t DirTrack{}, DirSector{}, LastDirSector{};
 size_t Track[41]{};
 
-unsigned char PixelCntTab[256]{};
+typedef struct tagBITMAPINFOHEADER {
+    int32_t biSize;
+    int32_t biWidth;
+    int32_t biHeight;
+    int16_t biPlanes;
+    int16_t biBitCount;
+    int32_t biCompression;
+    int32_t biSizeImage;
+    int32_t biXPelsPerMeter;
+    int32_t biYPelsPerMeter;
+    int32_t biClrUsed;
+    int32_t biClrImportant;
+} BITMAPINFOHEADER, * LPBITMAPINFOHEADER, * PBITMAPINFOHEADER;
 
-//Private BGCol, FGCol As Color
+typedef struct tagRGBQUAD {
+    unsigned char rgbBlue;
+    unsigned char rgbGreen;
+    unsigned char rgbRed;
+    unsigned char rgbReserved;
+} RGBQUAD;
+
+typedef struct tagBITMAPINFO {
+    BITMAPINFOHEADER bmiHeader;
+    RGBQUAD          bmiColors[1];
+} BITMAPINFO, * LPBITMAPINFO, * PBITMAPINFO;
+
+BITMAPINFO BmpInfo;
+BITMAPINFOHEADER BmpInfoHeader;
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -1203,6 +1247,432 @@ bool ConvertJsonToDirArt()
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
+unsigned int GetPixel(size_t X, size_t Y)
+{
+    size_t Pos = Y * ((size_t)ImgWidth * 4) + (X * 4);
+
+    unsigned char R = Image[Pos + 0];
+    unsigned char G = Image[Pos + 1];
+    unsigned char B = Image[Pos + 2];
+    unsigned char A = Image[Pos + 3];
+
+    unsigned int Col = (R * 0x1000000) + (G * 0x10000) + (B * 0100) + A;
+
+    return Col;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+bool IdentyfyColors()
+{
+    unsigned int Col1 = GetPixel(0, 0);  //The first of two allowed colors per image
+    unsigned int Col2 = Col1;
+    unsigned int ThisCol = 0;
+
+    //First find two colors (Col1 is already assigned to pixel(0,0))
+    for (size_t y = 0; y < ImgHeight; y += Mplr)
+    {
+        for (size_t x = 0; x < ImgWidth; x += Mplr)
+        {
+            ThisCol = GetPixel(x, y);
+            if ((ThisCol != Col1) && (Col2 == Col1))
+            {
+                Col2 = ThisCol;
+            }
+            else if ((ThisCol != Col1) && (ThisCol != Col2))
+            {
+                cerr << "***CRITICAL***\tThis image contains more than two colors.\n";
+                return false;
+            }
+        }
+    }
+
+    bool Simple = true;
+
+    if (!Simple)
+    {
+        //Start with same colors
+        FGCol = Col1;
+        BGCol = Col1;
+
+        int PixelCnt = 0;
+        for (size_t cy = 0; cy < ImgHeight; cy += ((size_t)Mplr * 8))
+        {
+            for (size_t cx = 0; cx < ImgWidth; cx += ((size_t)Mplr * 8))
+            {
+                PixelCnt = 0;
+                unsigned int FirstCol = GetPixel(cx, cy);
+                for (size_t y = 0; y < (size_t)Mplr * 8; y += (size_t)Mplr)
+                {
+                    for (size_t x = 0; x < (size_t)Mplr * 8; x += (size_t)Mplr)
+                    {
+                        if (GetPixel(cx + x, cy + y) == FirstCol)
+                        {
+                            PixelCnt++;
+                        }
+                    }
+                }
+                if (PixelCnt == 64)
+                {
+                    BGCol = FirstCol;
+                    FGCol = (BGCol = Col1) ? Col2 : Col1;
+                    break;
+                }
+            }//End cx
+            if (PixelCnt == 64)
+            {
+                break;
+            }
+        }//End cy
+
+        if (FGCol != BGCol)
+        {
+            return true;
+        }
+
+        //No SPACE found in DirArt PNG, now check low and high density pixels
+
+        int LoPx = 0;
+        int HiPx = 0;
+       
+        for (size_t cy = 0; cy < ImgHeight; cy += (size_t)Mplr * 8)
+        {
+            for (size_t cx = 0; cx < ImgWidth; cx += (size_t)Mplr * 8)
+            {
+                //Low density pixels = pixels most likely to be 0 (0:2, 7:2, 0:5. 7:5, 5:7)
+                if (GetPixel(cx + 0, cy + 2) == Col1) LoPx++;
+                if (GetPixel(cx + 7, cy + 2) == Col1) LoPx++;
+                if (GetPixel(cx + 0, cy + 5) == Col1) LoPx++;
+                if (GetPixel(cx + 7, cy + 5) == Col1) LoPx++;
+                if (GetPixel(cx + 5, cy + 7) == Col1) LoPx++;
+
+                //High density pixels = pixels most likely to be 1 (2:3, 3:3, 4:3, 3:6, 4:6)
+                if (GetPixel(cx + 2, cy + 3) == Col1) HiPx++;
+                if (GetPixel(cx + 3, cy + 3) == Col1) HiPx++;
+                if (GetPixel(cx + 4, cy + 3) == Col1) HiPx++;
+                if (GetPixel(cx + 3, cy + 6) == Col1) HiPx++;
+                if (GetPixel(cx + 4, cy + 6) == Col1) HiPx++;
+
+            }//End cx
+        }//End cy
+    
+        if (LoPx > HiPx)
+        {
+            BGCol = Col1;
+            FGCol = Col2;
+        }
+        else
+        {
+            BGCol = Col2;
+            FGCol = Col1;
+        }
+
+        if (FGCol != BGCol)
+        {
+            return true;
+        }
+    }   //End Simple
+
+
+    //Same distribution of low density and high density pixels :(
+    //Let's simply use darker color as BGCol
+    int R1 = Col1 / 0x1000000;
+    int G1 = Col1 / 0x10000;
+    int B1 = Col1 / 0x100;
+    int R2 = Col2 / 0x1000000;
+    int G2 = Col2 / 0x10000;
+    int B2 = Col2 / 0x100;
+
+    double C1 = sqrt((0.21 * R1 * R1) + (0.72 * G1 * G1) + (0.07 * B1 * B1));
+    double C2 = sqrt((0.21 * R2 * R2) + (0.72 * G2 * G2) + (0.07 * B2 * B2));
+    //Another formula: sqrt(0.299 * R ^ 2 + 0.587 * G ^ 2 + 0.114 * B ^ 2)
+
+    if (C1 < C2)
+    {
+        BGCol = Col1;
+        FGCol = Col2;
+    }
+    else
+    {
+        BGCol = Col2;
+        FGCol = Col1;
+    }
+
+    return true;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+#define DATA_OFFSET_OFFSET 0x000A
+#define BIH_OFFSET 0x00E
+//#define WIDTH_OFFSET 0x0012
+//##define HEIGHT_OFFSET 0x0016
+//#define BITS_PER_PIXEL_OFFSET 0x001C
+
+bool DecodeBmp()
+{
+    memcpy(&BmpInfoHeader, &BmpRaw[BIH_OFFSET], sizeof(BmpInfoHeader));
+
+    int ColMax = 0;
+    if (BmpInfoHeader.biBitCount == 1)
+    {
+        ColMax = 2;
+    }
+    else if (BmpInfoHeader.biBitCount == 4)
+    {
+        ColMax = 16;
+    }
+    else if (BmpInfoHeader.biBitCount == 8)
+    {
+        ColMax = 256;
+    }
+    
+    PBITMAPINFO BmpInfo = (PBITMAPINFO)new char[sizeof(BITMAPINFOHEADER) + (ColMax * sizeof(RGBQUAD))];
+
+    //BmpInfo->bmiHeader = BmpInfoHeader;
+    memcpy(&BmpInfo->bmiHeader, &BmpInfoHeader, sizeof(BmpInfoHeader));
+    
+    for (size_t i = 0; i < ColMax; i++)
+    {
+        memcpy(&BmpInfo->bmiColors[i], &BmpRaw[0x36 + (i * 4)], sizeof(RGBQUAD));
+    }
+
+    size_t DataOffset = (size_t)BmpRaw[DATA_OFFSET_OFFSET] + (size_t)(BmpRaw[DATA_OFFSET_OFFSET + 1] * 0x100) + (size_t)(BmpRaw[DATA_OFFSET_OFFSET + 2] * 0x10000) + (size_t)(BmpRaw[DATA_OFFSET_OFFSET + 3] * 01000000);
+
+    size_t RowCnt = BmpInfo->bmiHeader.biHeight;                                            //704
+    size_t RowLen = BmpInfo->bmiHeader.biWidth / (double)((double)8 / BmpInfo->bmiHeader.biBitCount);       //256/(8/1)=32
+    size_t PaddedRowLen = (RowLen % 4) == 0 ? RowLen : RowLen - (RowLen % 4) + 4;           //32
+
+    size_t BmpSize = BmpInfo->bmiHeader.biWidth * 4 * BmpInfo->bmiHeader.biHeight;          //256*704*4=720896
+    Image.resize(BmpSize);
+
+    size_t BmpOffset = 0;
+
+    if (ColMax != 0)
+    {
+        //Use Palette Data
+        for (int y = (BmpInfo->bmiHeader.biHeight - 1); y >= 0; y--)
+        {
+            size_t RowOffset = DataOffset + (y * PaddedRowLen);                             //62 + (703*32) = 22558
+            for (size_t x = 0; x < RowLen; x++)
+            {
+                unsigned int Pixel = BmpRaw[RowOffset + x];
+
+                if (ColMax == 2)
+                {
+                    for (int b = 7; b >= 0; b--)
+                    {   //2 colors
+                        int PaletteIndex = (Pixel >> b) % 2;
+
+                        Image[BmpOffset + 0] = BmpInfo->bmiColors[PaletteIndex].rgbRed;
+                        Image[BmpOffset + 1] = BmpInfo->bmiColors[PaletteIndex].rgbGreen;
+                        Image[BmpOffset + 2] = BmpInfo->bmiColors[PaletteIndex].rgbBlue;
+                        BmpOffset += 4;
+                    }
+                }
+                else if (ColMax == 16)
+                {
+                    for (int b = 4; b >= 0; b -= 4)
+                    {   //16 colors
+                        int PaletteIndex = (Pixel >> b) % 16;
+
+                        Image[BmpOffset + 0] = BmpInfo->bmiColors[PaletteIndex].rgbRed;
+                        Image[BmpOffset + 1] = BmpInfo->bmiColors[PaletteIndex].rgbGreen;
+                        Image[BmpOffset + 2] = BmpInfo->bmiColors[PaletteIndex].rgbBlue;
+                        BmpOffset += 4;
+                    }
+                }
+                else
+                {   //256 colors
+                    int PaletteIndex = Pixel;
+
+                    Image[BmpOffset + 0] = BmpInfo->bmiColors[PaletteIndex].rgbRed;
+                    Image[BmpOffset + 1] = BmpInfo->bmiColors[PaletteIndex].rgbGreen;
+                    Image[BmpOffset + 2] = BmpInfo->bmiColors[PaletteIndex].rgbBlue;
+                    BmpOffset += 4;
+                }
+            }
+        }
+    }
+    else if (BmpInfo->bmiHeader.biBitCount = 24)
+    {
+        //No Palette
+        for (int y = (BmpInfo->bmiHeader.biHeight - 1); y >= 0; y--)
+        {
+            size_t RowOffset = DataOffset + (y * PaddedRowLen);                             //62 + (703*32) = 22558
+            for (size_t x = 0; x < (RowLen / 3); x++)
+            {
+                Image[BmpOffset + 0] = BmpRaw[RowOffset + (x * 3) + 2];
+                Image[BmpOffset + 1] = BmpRaw[RowOffset + (x * 3) + 1];
+                Image[BmpOffset + 2] = BmpRaw[RowOffset + (x * 3) + 0];
+                BmpOffset += 4;
+            }
+        }
+    }
+    else
+    {
+        //No Palette
+        for (int y = (BmpInfo->bmiHeader.biHeight - 1); y >= 0; y--)
+        {
+            size_t RowOffset = DataOffset + (y * PaddedRowLen);                             //62 + (703*32) = 22558
+            for (size_t x = 0; x < (RowLen / 4); x++)
+            {
+                Image[BmpOffset + 0] = BmpRaw[RowOffset + (x * 4) + 2];
+                Image[BmpOffset + 1] = BmpRaw[RowOffset + (x * 4) + 1];
+                Image[BmpOffset + 2] = BmpRaw[RowOffset + (x * 4) + 0];
+                BmpOffset += 4;
+            }
+        }
+    }
+    /*
+            ofstream myFile(OutFileName + ".BMP", ios::out | ios::binary);
+
+            if (myFile.is_open())
+            {
+                cout << "Writing " + OutFileName + ".BMP...\n";
+                myFile.write((char*)&Image[0], BmpSize);
+                cout << "Done!\n";
+                return true;
+            }
+    */
+
+    Mplr = BmpInfo->bmiHeader.biWidth / 128;
+
+    ImgWidth = BmpInfo->bmiHeader.biWidth;
+    ImgHeight = BmpInfo->bmiHeader.biHeight;
+
+    return true;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+bool ConvertImgToDirArt()
+{
+    if (DirArtType == ".png")
+    {
+        //decode
+        unsigned error = lodepng::decode(Image, ImgWidth, ImgHeight, InFileName);
+
+        //if there's an error, display it
+        if (error)
+        {
+            cout << "***CRITICAL***\tPNG decoder error: " << error << ": " << lodepng_error_text(error) << std::endl;
+            return false;
+        }
+
+        if (ImgWidth % 128 != 0)
+        {
+            cerr << "Invalid image size. The image must have a width of 128 pixels (16 chars).\n";
+            return false;
+        }
+
+        Mplr = ImgWidth / 128;
+
+    }
+    else if (DirArtType == ".bmp")
+    {
+        ReadBinaryFile(InFileName, BmpRaw);
+
+        DecodeBmp();
+
+    }
+
+    if (!IdentyfyColors())
+    {
+        return false;
+    }
+
+    int PixelCnt = 0;
+
+    for (size_t cy = 0; cy < ImgHeight; cy += (size_t)Mplr * 8)
+    {
+        unsigned int Entry[16]{};
+        for (size_t cx = 0; cx < ImgWidth; cx += (size_t)Mplr * 8)
+        {
+            PixelCnt = 0;
+            for (size_t y = 0; y < (size_t)Mplr * 8; y += (size_t)Mplr)
+            {
+                for (size_t x = 0; x < (size_t)Mplr * 8; x += (size_t)Mplr)
+                {
+                    if (GetPixel(cx + x, cy + y) == FGCol)
+                    {
+                        PixelCnt++;
+                    }
+                }//End x
+            }//End y
+            Entry[cx / ((size_t)Mplr * 8)] = 32;
+
+            for (size_t i = 0; i < 256; i++)
+            {
+                if (PixelCnt == PixelCntTab[i])
+                {
+                    size_t px = i % 16;
+                    size_t py = i / 16;
+                    bool Match = true;
+                    for (size_t y = 0; y < 8; y++)
+                    {
+                        for (size_t x = 0; x < 8; x++)
+                        {
+                            size_t PixelX = cx + ((size_t)Mplr * x);
+                            size_t PixelY = cy + ((size_t)Mplr * y);
+                            unsigned int ThisCol = GetPixel(PixelX, PixelY);
+                            unsigned char DACol = 0;
+                            if (ThisCol == FGCol)
+                            {
+                                DACol = 1;
+                            }
+
+                            size_t CharSetPos = (py * 8 * 128) + (y * 128) + (px * 8) + x;
+
+                            if (DACol != CharSetTab[CharSetPos])
+                            {
+                                Match = false;
+                                break;
+                            }
+                        }//Next x
+                        if (!Match)
+                        {
+                            break;
+                        }//End if
+                    }//Next y
+                    if (Match)
+                    {
+                        Entry[cx / ((size_t)Mplr * 8)] = i;
+                        break;
+                    }//End if
+                }//End if
+            }//Next i
+        }//Next cx
+
+
+        FindNextDirPos();
+
+        if (DirPos != 0)
+        {
+            if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] == 0)
+            {
+                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = 0x80;  //"DEL"
+                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;    //Track 18
+                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;     //Sector 0
+            }
+
+            for (int i = 0; i < 16; i++)
+            {
+                unsigned int C = Entry[i];
+                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = Petscii2DirArt[C];
+            }
+        }
+        else
+        {
+            break;
+        }
+    }//Next cy
+
+    return true;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
 void FindLastUsedDirPos()
 {
     //First find the last used sector
@@ -1494,7 +1964,7 @@ int main(int argc, char* argv[])
     {
 
     #ifdef DEBUG
-        InFileName = "c:\\Users\\Tamas\\OneDrive\\C64\\C++\\dart\\test\\Test.json";
+        InFileName = "c:\\Users\\Tamas\\OneDrive\\C64\\C++\\dart\\test\\Jab.bmp";
     #else
 
         cout << "Usage: dart input[*] [output.d64]\n\n";
@@ -1540,7 +2010,6 @@ int main(int argc, char* argv[])
 
     CreateTables();
 
-    string DirArtType = ".";
     int ExtStart = InFileName.length();
 
     for (int i = InFileName.length() - 1; i >= 0; i--)
@@ -1651,17 +2120,17 @@ int main(int argc, char* argv[])
         if (!ConvertPetToDirArt())
             return EXIT_FAILURE;
     }
-    else if ((DirArtType == ".png") || (DirArtType == ".txt"))
+    else if (DirArtType == ".png")
     {
-        if (DirArtType == ".png")
-        {
-            cout << "Importing DirArt from .PNG image...\n";
-        }
-        else
-        {
-            cout << "Importing DirArt from .BMP image...\n";
-        }
-        //ConvertImageToD64();
+        cout << "Importing DirArt from .PNG image...\n";
+        if (!ConvertImgToDirArt())
+            return EXIT_FAILURE;
+    }
+    else if (DirArtType == ".bmp")
+    {
+        cout << "Importing DirArt from .BMP image...\n";
+        if (!ConvertImgToDirArt())
+            return EXIT_FAILURE;
     }
     else
     {

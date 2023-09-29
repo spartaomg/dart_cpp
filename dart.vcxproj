@@ -135,11 +135,15 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="ascii2dirart.cpp" />
+    <ClCompile Include="charsettab.cpp" />
     <ClCompile Include="dart.cpp" />
     <ClCompile Include="petscii2dirart.cpp" />
+    <ClCompile Include="pixelcnttab.cpp" />
+    <ClCompile Include="thirdparty\lodepng.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="common.h" />
+    <ClInclude Include="thirdparty\lodepng.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="makefile" />
