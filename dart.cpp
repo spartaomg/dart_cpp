@@ -414,8 +414,9 @@ bool ImportFromD64()
                 }
                 else
                 {
-                    DirFull = true;
-                    break;
+                    //DirFull = true;
+                    //break;
+                    return true;
                 }
             }
         }
@@ -480,11 +481,11 @@ bool ImportFromTxt()
         }
         else
         {
-            break;
+            return true;
         }
     }
 
-    if ((DirArt != "") && (DirPos != 0))
+    if (DirArt != "")
     {
         FindNextDirPos();
         if (DirPos != 0)
@@ -519,7 +520,7 @@ bool ImportFromBinary() {
     size_t EntryStart = DAPtr;
     while (DAPtr <= DA.size())
     {
-        if ((DAPtr == EntryStart + 16) || (DA[DAPtr] == 0xa0) || ((DAPtr == DA.size()) && (DAPtr != EntryStart)))
+        if (((DAPtr == DA.size()) && (DAPtr != EntryStart)) || (DAPtr == EntryStart + 16) || (DAPtr < DA.size() && (DA[DAPtr] == 0xa0)))
         {
             //if ((DAPtr == EntryStart) && (DAPtr == DA.size()))   //BUG FIX - accept empty lines, i.e. treat each 0xa0 chars as line ends
             //{
@@ -552,7 +553,7 @@ bool ImportFromBinary() {
                 }
                 else
                 {
-                    break;
+                    return true;
                 }
 
                 while ((DAPtr < DA.size()) && (DAPtr < EntryStart + 39) && (DA[DAPtr] != 0xa0))
@@ -694,7 +695,7 @@ bool AddCArrayDirEntry(int RowLen)
             }
             else
             {
-                return false;
+                return true;
             }
         }
     }
@@ -812,7 +813,7 @@ void AddAsmDirEntry(string DirEntry) {
         EntrySegments[i] = "";
     }
 
-    while ((DirArt.find(delimiter) != string::npos) && (NumSegments < 4))
+    while ((DirEntry.find(delimiter) != string::npos) && (NumSegments < 4))
     {
         EntrySegments[NumSegments++] = DirEntry.substr(0, DirEntry.find(delimiter));
         DirEntry.erase(0, DirEntry.find(delimiter) + delimiter.length());
@@ -1015,11 +1016,11 @@ bool ImportFromAsm()
         }
         else
         {
-            break;
+            return true;
         }
     }
 
-    if ((DirArt != "") && (DirPos != 0))
+    if (DirArt != "")
     {
         FindNextDirPos();
         if (DirPos != 0)
@@ -1087,7 +1088,7 @@ bool ConvertPetToDirArt()
         }
         else
         {
-            break;
+            return true;
         }
     }
 
@@ -1215,7 +1216,7 @@ bool ImportFromJson()
             }
             else
             {
-                break;
+                return true;
             }
         }
     }
@@ -1249,9 +1250,9 @@ bool IdentifyColors()
     unsigned int Col2 = Col1;
 
     //First find two colors (Col1 is already assigned to pixel(0,0))
-    for (size_t y = 0; y < ImgHeight; y += Mplr)
+    for (size_t y = 0; y < ImgHeight; y++)  //Bug fix: check every single pixel, no just one in every Mplr-sized square
     {
-        for (size_t x = 0; x < ImgWidth; x += Mplr)
+        for (size_t x = 0; x < ImgWidth; x++)
         {
             unsigned int ThisCol = GetPixel(x, y);
             if ((ThisCol != Col1) && (Col2 == Col1))
@@ -1603,7 +1604,7 @@ bool ImportFromImage()
         }
         else
         {
-            break;
+            return true;
         }
     }//Next cy
 
@@ -1800,11 +1801,11 @@ void ShowInfo()
     cout << "DART is a simple command line tool that imports directory art from a variety of source file types to D64 disk images.\n\n";
     cout << "Usage:\n";
     cout << "------\n";
-    cout << "dart input[*] [output.d64]\n\n";
+    cout << "dart input[+] [output.d64]\n\n";
     cout << "By default, DART will overwrite any existing directory entries in output.d64 without modifying the entries' type.\n";
-    cout << "To append the imported DirArt to the existing directory entries without overwriting them, mark the input file with an\n";
-    cout << "asterisk (i.e. input*, see example below). Thus, multiple DirArts can be imported in the same D64 as long as there\n";
-    cout << "is space on track 18.\n\n";
+    cout << "To append the imported DirArt to the existing directory entries without overwriting them, mark the input file with a\n";
+    cout << "plus sign (e.g., input.d64+, see example below). Thus, multiple DirArts can be imported in the same D64 as long as\n";
+    cout << "there is space on track 18.\n\n";
     cout << "The [output.d64] parameter is optional. If not specified, DART will create an input_out.d64 file.\n\n";
     cout << "Accepted input file types:\n";
     cout << "--------------------------\n";
@@ -1854,7 +1855,7 @@ void ShowInfo()
     cout << "directory entries.\n\n";
     cout << "Example 3:\n";
     cout << "----------\n\n";
-    cout << "dart MyDirArt.asm* MyDemo.d64\n\n";
+    cout << "dart MyDirArt.asm+ MyDemo.d64\n\n";
     cout << "DART will append the DirArt from a KickAss ASM source file to the existing directory entries of MyDemo.d64.\n";
 }
 
@@ -1870,7 +1871,7 @@ int main(int argc, char* argv[])
     {
 
     #ifdef DEBUG
-        InFileName = "c:\\Users\\Tamas\\OneDrive\\C64\\C++\\dart\\test\\Asm1.asm";
+        InFileName = "c:\\Users\\Tamas\\OneDrive\\C64\\C++\\dart\\test\\Bin2.bin+";
     #else
 
         cout << "Usage: dart input[*] [output.d64]\n\n";
@@ -1902,7 +1903,7 @@ int main(int argc, char* argv[])
         return EXIT_SUCCESS;
     }
 
-    if (InFileName.at(InFileName.size() - 1) == '*')
+    if (InFileName.at(InFileName.size() - 1) == '+')
     {
         AppendDir = true;
         InFileName = InFileName.substr(0, InFileName.size() - 1);
