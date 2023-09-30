@@ -1243,18 +1243,17 @@ unsigned int GetPixel(size_t X, size_t Y)
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
-bool IdentyfyColors()
+bool IdentifyColors()
 {
     unsigned int Col1 = GetPixel(0, 0);  //The first of two allowed colors per image
     unsigned int Col2 = Col1;
-    unsigned int ThisCol = 0;
 
     //First find two colors (Col1 is already assigned to pixel(0,0))
     for (size_t y = 0; y < ImgHeight; y += Mplr)
     {
         for (size_t x = 0; x < ImgWidth; x += Mplr)
         {
-            ThisCol = GetPixel(x, y);
+            unsigned int ThisCol = GetPixel(x, y);
             if ((ThisCol != Col1) && (Col2 == Col1))
             {
                 Col2 = ThisCol;
@@ -1265,6 +1264,12 @@ bool IdentyfyColors()
                 return false;
             }
         }
+    }
+
+    if (Col1 == Col2)
+    {
+        cerr << "***CRITICAL***Unable to determine foreground and background colors in DirArt image file.\n";
+        return false;
     }
 
     //Start with same colors
@@ -1300,60 +1305,58 @@ bool IdentyfyColors()
         }//End cx
     }//End cy
 
-    bool Simple = true;
-
-    if (!Simple)
-    {
+#ifdef PXDENSITY
         //No SPACE found in DirArt image, now check the distribution of low and high density pixels (i.e. pixels that have the highest chance to be eighter BG of FG color)
         //THIS IS NOT USED AS THE DISTRIBUTION OF THE INDIVIDUAL CHARACTERS CANNOT BE PREDICTED
-        int LoPx = 0;
-        int HiPx = 0;
+    int LoPx = 0;
+    int HiPx = 0;
 
-        for (size_t cy = 0; cy < ImgHeight; cy += (size_t)Mplr * 8)
+    for (size_t cy = 0; cy < ImgHeight; cy += (size_t)Mplr * 8)
+    {
+        for (size_t cx = 0; cx < ImgWidth; cx += (size_t)Mplr * 8)
         {
-            for (size_t cx = 0; cx < ImgWidth; cx += (size_t)Mplr * 8)
-            {
-                //Low density pixels = pixels most likely to be 0 (0:2, 7:2, 0:5. 7:5, 5:7)
-                if (GetPixel(cx + 0, cy + 2) == Col1) LoPx++;
-                if (GetPixel(cx + 7, cy + 2) == Col1) LoPx++;
-                if (GetPixel(cx + 0, cy + 5) == Col1) LoPx++;
-                if (GetPixel(cx + 7, cy + 5) == Col1) LoPx++;
-                if (GetPixel(cx + 5, cy + 7) == Col1) LoPx++;
+            //Low density pixels = pixels most likely to be 0 (0:2, 7:2, 0:5. 7:5, 5:7)
+            if (GetPixel(cx + 0, cy + 2) == Col1) LoPx++;
+            if (GetPixel(cx + 7, cy + 2) == Col1) LoPx++;
+            if (GetPixel(cx + 0, cy + 5) == Col1) LoPx++;
+            if (GetPixel(cx + 7, cy + 5) == Col1) LoPx++;
+            if (GetPixel(cx + 5, cy + 7) == Col1) LoPx++;
 
-                //High density pixels = pixels most likely to be 1 (2:3, 3:3, 4:3, 3:6, 4:6)
-                if (GetPixel(cx + 2, cy + 3) == Col1) HiPx++;
-                if (GetPixel(cx + 3, cy + 3) == Col1) HiPx++;
-                if (GetPixel(cx + 4, cy + 3) == Col1) HiPx++;
-                if (GetPixel(cx + 3, cy + 6) == Col1) HiPx++;
-                if (GetPixel(cx + 4, cy + 6) == Col1) HiPx++;
+            //High density pixels = pixels most likely to be 1 (2:3, 3:3, 4:3, 3:6, 4:6)
+            if (GetPixel(cx + 2, cy + 3) == Col1) HiPx++;
+            if (GetPixel(cx + 3, cy + 3) == Col1) HiPx++;
+            if (GetPixel(cx + 4, cy + 3) == Col1) HiPx++;
+            if (GetPixel(cx + 3, cy + 6) == Col1) HiPx++;
+            if (GetPixel(cx + 4, cy + 6) == Col1) HiPx++;
 
-            }//End cx
-        }//End cy
+        }//End cx
+    }//End cy
 
-        if (LoPx > HiPx)
-        {
-            BGCol = Col1;
-            FGCol = Col2;
-        }
-        else
-        {
-            BGCol = Col2;
-            FGCol = Col1;
-        }
-
-        if (FGCol != BGCol)
-        {
-            return true;
-        }
+    if (LoPx > HiPx)
+    {
+        BGCol = Col1;
+        FGCol = Col2;
     }
+    else
+    {
+        BGCol = Col2;
+        FGCol = Col1;
+    }
+
+    if (FGCol != BGCol)
+    {
+        return true;
+    }
+#endif // PXDENSITY
+
 
     //Let's use the darker color as BGCol
     int R1 = Col1 / 0x1000000;
-    int G1 = Col1 / 0x10000;
-    int B1 = Col1 / 0x100;
+    int G1 = (Col1 & 0xff0000) / 0x10000;
+    int B1 = (Col1 & 0x00ff00) / 0x100;
     int R2 = Col2 / 0x1000000;
-    int G2 = Col2 / 0x10000;
-    int B2 = Col2 / 0x100;
+    int G2 = (Col2 & 0xff0000) / 0x10000;
+    int B2 = (Col2 & 0x00ff00) / 0x100;
 
     double C1 = sqrt((0.21 * R1 * R1) + (0.72 * G1 * G1) + (0.07 * B1 * B1));
     double C2 = sqrt((0.21 * R2 * R2) + (0.72 * G2 * G2) + (0.07 * B2 * B2));
@@ -1361,6 +1364,12 @@ bool IdentyfyColors()
 
     BGCol = (C1 < C2) ? Col1 : Col2;
     FGCol = (BGCol == Col1) ? Col2 : Col1;
+
+    if (BGCol == FGCol)
+    {
+        cerr << "***CRITICAL***Unable to determine foreground and background colors in DirArt image file.\n";
+        return false;
+    }
 
     return true;
 }
@@ -1472,20 +1481,25 @@ bool ImportFromImage()
         //if there's an error, display it
         if (error)
         {
-            cout << "***CRITICAL***\tPNG decoder error: " << error << ": " << lodepng_error_text(error) << std::endl;
-            return false;
-        }
-
-        if (ImgWidth % 128 != 0)
-        {
-            cerr << "Invalid image size. The image must have a width of 128 pixels (16 chars).\n";
+            cout << "***CRITICAL***\tPNG decoder error: " << error << ": " << lodepng_error_text(error) << "\n";
             return false;
         }
 
     }
     else if (DirArtType == "bmp")
     {
-        ReadBinaryFile(InFileName, BmpRaw);
+        BmpRaw.clear();
+
+        if (ReadBinaryFile(InFileName, BmpRaw) == -1)
+        {
+            cerr << "***CRITICAL***\tUnable to open BMP DirArt file.\n";
+            return false;
+        }
+        else if (BmpRaw.size() == 0)
+        {
+            cerr << "***CRITICAL***\tThe DirArt file cannot be 0 bytes long.\n";
+            return false;
+        }
 
         if(!DecodeBmp())
         {
@@ -1494,9 +1508,15 @@ bool ImportFromImage()
     }
     //Here we have the image decoded in Image vector of unsigned chars, 4 bytes representing a pixel in RGBA format
 
+    if (ImgWidth % 128 != 0)
+    {
+        cerr << "***CRITICAL***\tInvalid image size. The image width must be multiples of 128 pixels (16 chars wide).\n";
+        return false;
+    }
+
     Mplr = ImgWidth / 128;
 
-    if (!IdentyfyColors())
+    if (!IdentifyColors())
     {
         return false;
     }
