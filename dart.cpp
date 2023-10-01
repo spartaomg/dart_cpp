@@ -8,7 +8,7 @@ const int ExtDiskSize = StdDiskSize + (85 * 256);
 
 vector <unsigned char> Disk;
 vector <unsigned char> Image;   //pixels in RGBA format (4 bytes per pixel)
-vector <unsigned char> BmpRaw;
+vector <unsigned char> ImgRaw;
 
 string InFileName = "";
 string OutFileName = "";
@@ -1379,42 +1379,64 @@ bool IdentifyColors()
 
 bool DecodeBmp()
 {
-    const size_t BIH = 0x0e;            //Offset of Bitmap Info Header within raw data
-    const size_t DATA_OFFSET = 0x0a;    //Offset of Bitmap Data Start within raw data
+    const size_t BIH = 0x0e;                                            //Offset of Bitmap Info Header within raw data
+    const size_t DATA_OFFSET = 0x0a;                                    //Offset of Bitmap Data Start within raw data
+    const size_t MINSIZE = sizeof(tagBITMAPINFOHEADER) + BIH;           //Minimum header size
 
-    memcpy(&BmpInfoHeader, &BmpRaw[BIH], sizeof(BmpInfoHeader));
+    if (ImgRaw.size() < MINSIZE)
+    {
+        cerr << "***CRITICAL***\tThe size of this BMP file is smaller than the minimum size allowed.\n";
+        return false;
+    }
+
+    memcpy(&BmpInfoHeader, &ImgRaw[BIH], sizeof(BmpInfoHeader));
 
     if (BmpInfoHeader.biWidth % 128 != 0)
     {
-        cerr << "Invalid image size. The image must have a width of 128 pixels (16 chars).\n";
+        cerr << "***CRITICAL***\tUnsupported BMP size. The image must be 128 pixels (16 chars) wide or a multiple of it if resized.\n";
+        return false;
+    }
+
+    if ((BmpInfoHeader.biCompression != 0) && (BmpInfoHeader.biCompression != 3))
+    {
+        cerr << "***CRITICAL***\tUnsupported BMP format. Sparkle can only work with uncompressed BMP files.\nT";
         return false;
     }
 
     int ColMax = (BmpInfoHeader.biBitCount < 24) ? (1 << BmpInfoHeader.biBitCount) : 0;
 
     PBITMAPINFO BmpInfo = (PBITMAPINFO)new char[sizeof(BITMAPINFOHEADER) + (ColMax * sizeof(RGBQUAD))];
-    
+
     //Copy info header into structure
     memcpy(&BmpInfo->bmiHeader, &BmpInfoHeader, sizeof(BmpInfoHeader));
-    
+
     //Copy palette into structure
     for (size_t i = 0; i < (size_t)ColMax; i++)
     {
-        memcpy(&BmpInfo->bmiColors[i], &BmpRaw[0x36 + (i * 4)], sizeof(RGBQUAD));
+        memcpy(&BmpInfo->bmiColors[i], &ImgRaw[0x36 + (i * 4)], sizeof(RGBQUAD));
     }
 
     //Calculate data offset
-    size_t DataOffset = (size_t)BmpRaw[DATA_OFFSET] + (size_t)(BmpRaw[DATA_OFFSET + 1] * 0x100) + (size_t)(BmpRaw[DATA_OFFSET + 2] * 0x10000) + (size_t)(BmpRaw[DATA_OFFSET + 3] * 01000000);
+    size_t DataOffset = (size_t)ImgRaw[DATA_OFFSET] + (size_t)(ImgRaw[DATA_OFFSET + 1] * 0x100) + (size_t)(ImgRaw[DATA_OFFSET + 2] * 0x10000) + (size_t)(ImgRaw[DATA_OFFSET + 3] * 01000000);
 
     //Calculate length of pixel rows in bytes
     size_t RowLen = ((size_t)BmpInfo->bmiHeader.biWidth * (size_t)BmpInfo->bmiHeader.biBitCount) / 8;
-    
-    //BMP pads pixel rows to multiples of 4 in bytes
+
+    //BMP pads pixel rows to a multiple of 4 in bytes
     size_t PaddedRowLen = (RowLen % 4) == 0 ? RowLen : RowLen - (RowLen % 4) + 4;
+    //size_t PaddedRowLen = ((RowLen + 3) / 4) * 4;
+
+    size_t CalcSize = DataOffset + (BmpInfo->bmiHeader.biHeight * PaddedRowLen);
+
+    if (ImgRaw.size() != CalcSize)
+    {
+        cerr << "***CRITICAL***\tCorrupted BMP file size.\n";
+        return false;
+    }
 
     //Calculate size of our image vector (we will use 4 bytes per pixel in RGBA format)
     size_t BmpSize = (size_t)BmpInfo->bmiHeader.biWidth * 4 * (size_t)BmpInfo->bmiHeader.biHeight;
-    
+
     //Resize image vector
     Image.resize(BmpSize, 0);
 
@@ -1432,7 +1454,7 @@ bool DecodeBmp()
 
             for (size_t x = 0; x < RowLen; x++)                         //Pixel row are read left to right
             {
-                unsigned int Pixel = BmpRaw[RowOffset + x];
+                unsigned int Pixel = ImgRaw[RowOffset + x];
 
                 for (int b = bstart; b >= 0; b -= BitsPerPx)
                 {
@@ -1453,12 +1475,12 @@ bool DecodeBmp()
         for (int y = (BmpInfo->bmiHeader.biHeight - 1); y >= 0; y--)    //Pixel rows are read from last bitmap row to first
         {
             size_t RowOffset = DataOffset + (y * PaddedRowLen);
-            
+
             for (size_t x = 0; x < RowLen; x += BytesPerPx)              //Pixel row are read left to right
             {
-                Image[BmpOffset + 0] = BmpRaw[RowOffset + x + 2];
-                Image[BmpOffset + 1] = BmpRaw[RowOffset + x + 1];
-                Image[BmpOffset + 2] = BmpRaw[RowOffset + x + 0];
+                Image[BmpOffset + 0] = ImgRaw[RowOffset + x + 2];
+                Image[BmpOffset + 1] = ImgRaw[RowOffset + x + 1];
+                Image[BmpOffset + 2] = ImgRaw[RowOffset + x + 0];
                 BmpOffset += 4;
             }
         }
@@ -1474,12 +1496,25 @@ bool DecodeBmp()
 
 bool ImportFromImage()
 {
+    ImgRaw.clear();
+    Image.clear();
+
+    if (ReadBinaryFile(InFileName, ImgRaw) == -1)
+    {
+        cerr << "***CRITICAL***\tUnable to open image DirArt file.\n";
+        return false;
+    }
+    else if (ImgRaw.size() == 0)
+    {
+        cerr << "***CRITICAL***\tThe DirArt file cannot be 0 bytes long.\n";
+        return false;
+    }
+
     if (DirArtType == "png")
     {
         //Load and decode PNG image using LodePNG (Copyright (c) 2005-2023 Lode Vandevenne)
-        unsigned error = lodepng::decode(Image, ImgWidth, ImgHeight, InFileName);
+        unsigned int error = lodepng::decode(Image, ImgWidth, ImgHeight, ImgRaw);
 
-        //if there's an error, display it
         if (error)
         {
             cout << "***CRITICAL***\tPNG decoder error: " << error << ": " << lodepng_error_text(error) << "\n";
@@ -1489,19 +1524,6 @@ bool ImportFromImage()
     }
     else if (DirArtType == "bmp")
     {
-        BmpRaw.clear();
-
-        if (ReadBinaryFile(InFileName, BmpRaw) == -1)
-        {
-            cerr << "***CRITICAL***\tUnable to open BMP DirArt file.\n";
-            return false;
-        }
-        else if (BmpRaw.size() == 0)
-        {
-            cerr << "***CRITICAL***\tThe DirArt file cannot be 0 bytes long.\n";
-            return false;
-        }
-
         if(!DecodeBmp())
         {
             return false;
@@ -1511,7 +1533,7 @@ bool ImportFromImage()
 
     if (ImgWidth % 128 != 0)
     {
-        cerr << "***CRITICAL***\tInvalid image size. The image width must be multiples of 128 pixels (16 chars wide).\n";
+        cerr << "***CRITICAL***\tUnsupported image size. The image must be 128 pixels (16 chars) wide or a multiple of it if resized.\n";
         return false;
     }
 
