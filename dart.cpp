@@ -6,6 +6,8 @@
 const int StdDiskSize = (664 + 19) * 256;
 const int ExtDiskSize = StdDiskSize + (85 * 256);
 
+const int NumSectorsTrack18 = 19;
+
 vector <unsigned char> Disk;
 vector <unsigned char> Image;   //pixels in RGBA format (4 bytes per pixel)
 vector <unsigned char> ImgRaw;
@@ -17,7 +19,7 @@ string DirArt = "";
 string DirArtType = "";
 
 bool DirEntryAdded = false;
-bool AppendDir = false;
+bool AppendMode = false;
 
 int DirPos = 0;
 int DiskSize = 0;
@@ -238,50 +240,97 @@ string ReadFileToString(const string& FileName, bool CorrectFilePath = false)
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
-void DeleteBit(size_t T, size_t S)
+void MarkSectorAsUsed(size_t T, size_t S)
 {
-
     size_t NumSectorPtr = Track[18] + (T * 4) + ((T > 35) ? 7 * 4 : 0);
-    size_t BitPtr = NumSectorPtr + 1 + (S / 8);        //BAM Position for Bit Change
+
+    unsigned char NumUnusedSectors = 0;
+    
+    //Calculate number of used sectors -before- update
+    for (size_t I = NumSectorPtr + 1; I <= NumSectorPtr + 3; I++)
+    {
+        unsigned char B = Disk[I];
+        for (int J = 0; J < 8; J++)
+        {
+            if (B % 2 == 1)
+            {
+                NumUnusedSectors++;
+            }
+            B >>= 1;
+        }
+    }
+
+    size_t BitPtr = NumSectorPtr + 1 + (S / 8);     //BAM Position for Bit Change
     unsigned char BitToDelete = 1 << (S % 8);       //BAM Bit to be deleted
 
     if ((Disk[BitPtr] & BitToDelete) != 0)
     {
         Disk[BitPtr] &= (255 - BitToDelete);
-
-        unsigned char NumUnusedSectors = 0;
-
-        for (size_t I = NumSectorPtr + 1; I <= NumSectorPtr + 3; I++)
-        {
-            unsigned char B = Disk[I];
-            for (int J = 0; J < 8; J++)
-            {
-                if (B % 2 == 1)
-                {
-                    NumUnusedSectors++;
-                }
-                B >>= 1;
-            }
-        }
-        Disk[NumSectorPtr] = NumUnusedSectors;
+        NumUnusedSectors--;
     }
+
+    Disk[NumSectorPtr] = NumUnusedSectors;
+
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+void MarkSectorAsFree(size_t T, size_t S)
+{
+    size_t NumSectorPtr = Track[18] + (T * 4) + ((T > 35) ? 7 * 4 : 0);
+
+    unsigned char NumUnusedSectors = 0;
+
+    //Calculate number of used sectors -before- update
+    for (size_t I = NumSectorPtr + 1; I <= NumSectorPtr + 3; I++)
+    {
+        unsigned char B = Disk[I];
+        for (int J = 0; J < 8; J++)
+        {
+            if (B % 2 == 1)
+            {
+                NumUnusedSectors++;
+            }
+            B >>= 1;
+        }
+    }
+
+    size_t BitPtr = NumSectorPtr + 1 + (S / 8);     //BAM Position for Bit Change
+    unsigned char BitToSet = 1 << (S % 8);       //BAM Bit to be deleted
+
+    if ((Disk[BitPtr] & BitToSet) != 1)
+    {
+        Disk[BitPtr] |= BitToSet;
+        NumUnusedSectors++;
+    }
+
+    Disk[NumSectorPtr] = NumUnusedSectors;
+
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
 void FindNextEmptyDirSector()
 {
+    //Check if the BAM shows any free sectors on track 18
+    if (Disk[Track[DirTrack] + (size_t)(18 * 4)] == 0)
+    {
+        DirSector = 0;
+        DirPos = 0;
+        cout << "***INFO***\tDirectory is full.\n";
+        return;
+    }
 
     LastDirSector = DirSector;
 
-    DirSector = 1;
+    DirSector = 1; //Skip BAM (Sectors are numbered 0-18 on track 18)
 
-    while (DirSector < 19)
+    while (DirSector < NumSectorsTrack18)   //last sector on track 18 is sector 18 (out of 0-18)
     {
         //Check in BAM if this is really a free sector
         size_t NumSectorPtr = Track[18] + (DirTrack * 4);
-        size_t BitPtr = NumSectorPtr + 1 + (DirSector / 8);      //BAM Position for Bit Change
-        unsigned char BitToCheck = 1 << (DirSector % 8);      //BAM Bit to be deleted
+        size_t BitPtr = NumSectorPtr + 1 + (DirSector / 8);     //BAM Position for Bit Change
+        unsigned char BitToCheck = 1 << (DirSector % 8);        //BAM Bit to be deleted
 
         if ((Disk[BitPtr] & BitToCheck) != 0)
         {
@@ -297,13 +346,13 @@ void FindNextEmptyDirSector()
             DirPos = 2;
             return;
         }
-        DirSector += 1;
+        DirSector++;
     }
     
     //Track 18 is full, no more empty sectors
     DirSector = 0;
     DirPos = 0;
-    cout << "***INFO***\tDirectory is full!\n";
+    cout << "***INFO***\tDirectory is full.\n";
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -317,31 +366,31 @@ void FindNextDirPos() {
     else
     {
         DirPos += 32;
-        if (DirPos > 256)
+        if (DirPos > 256)   //This sector is full, let's find the next dir sector
         {
             if(Disk[Track[DirTrack] + (DirSector * 256) + 0] != 0)
             {
-                //We are overwriting existing dir entries in the T:S chain
-                unsigned char T = Disk[Track[DirTrack] + (DirSector * 256) + 0];
-                unsigned char S = Disk[Track[DirTrack] + (DirSector * 256) + 1];
-                if ((T == DirTrack) && (S == 0))
+                //This is NOT the last sector in the T:S chain, we are overwriting existing dir entries
+                int NextT = Disk[Track[DirTrack] + (DirSector * 256) + 0];
+                int NextS = Disk[Track[DirTrack] + (DirSector * 256) + 1];
+                
+                if (NextT != 18)
                 {
-                    Disk[Track[DirTrack] + (DirSector * 256) + 0] = 0;
-                    Disk[Track[DirTrack] + (DirSector * 256) + 1] = 255;
-                    FindNextEmptyDirSector();
-
+                    //DART doesn't support directories outside track 18
+                    DirSector = 0;
+                    DirPos = 0;
+                    cout << "***INFO***\tThis directory sector chain leaves track 18. DART doesn't support directories outside track 18!\n";
+                    return;
                 }
                 else
                 {
-                    DirTrack = T;
-                    DirSector = S;
+                    //Otherwise, go to next dir sector in T:S chain and overwrite first directory entry
+                    DirTrack = NextT;
+                    DirSector = NextS;
                     DirPos = 2;
-                    T = Disk[Track[DirTrack] + (DirSector * 256) + 0];
-                    S = Disk[Track[DirTrack] + (DirSector * 256) + 1];
-                    if ((T == DirTrack) && (S == 0))
+                    for (int i = 2; i < 256; i ++)
                     {
-                        Disk[Track[DirTrack] + (DirSector * 256) + 0] = 0;
-                        Disk[Track[DirTrack] + (DirSector * 256) + 1] = 255;
+                        Disk[Track[DirTrack] + (DirSector * 256) + i] = 0;  //delete all file in dir sector
                     }
                 }
             }
@@ -354,13 +403,41 @@ void FindNextDirPos() {
     }
     if (DirSector != 0)
     {
-        DeleteBit(DirTrack, DirSector);
+        MarkSectorAsUsed(DirTrack, DirSector);
+    }
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------------
+
+void DeleteOldDir()
+{
+    //Free up unused dir sectors from old T:S chain in Overwrite Mode
+    
+    int NextT = Disk[Track[DirTrack] + (DirSector * 256) + 0];
+    int NextS = Disk[Track[DirTrack] + (DirSector * 256) + 1];
+
+    while (NextT != 0)
+    {
+        Disk[Track[DirTrack] + (DirSector * 256) + 0] = 0;
+        Disk[Track[DirTrack] + (DirSector * 256) + 1] = 0xff;
+
+        DirTrack = NextT;
+        DirSector = NextS;
+        
+        NextT = Disk[Track[DirTrack] + (DirSector * 256) + 0];
+        NextS = Disk[Track[DirTrack] + (DirSector * 256) + 1];
+
+        for (int i = 2; i < 256; i++)
+        {
+            Disk[Track[DirTrack] + (DirSector * 256) + i] = 0;
+        }
+        MarkSectorAsFree(DirTrack, DirSector);
     }
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------------
 //  IMPORT FROM D64
-//----------------------------------------------------------------------------------------------------------------------------------------------------
+//----------------------------------------------------------------------------------------------------------------------------------------------------------
 
 bool ImportFromD64()
 {
@@ -395,22 +472,22 @@ bool ImportFromD64()
 
                 if (DirPos != 0)
                 {
-                    if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] == 0)
-                    {
+                    //if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] == 0)
+                    //{
                         //File type and T:S are not yet defined
                         for (int i = 0; i < (16 + 3); i++)     //Include file type and T:S
                         {
                             Disk[Track[DirTrack] + (DirSector * 256) + DirPos + i] = DA[DAPtr + b + i];
                         }
-                    }
-                    else
-                    {
-                        //File type and T:S are already defined
-                        for (int i = 0; i < 16; i++)        //Do not include file type and T:S
-                        {
-                            Disk[Track[DirTrack] + (DirSector * 256) + DirPos + i + 3] = DA[DAPtr + b + i + 3];
-                        }
-                    }
+                    //}
+                    //else
+                    //{
+                    //    //File type and T:S are already defined
+                    //    for (int i = 0; i < 16; i++)        //Do not include file type and T:S
+                    //    {
+                    //        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + i + 3] = DA[DAPtr + b + i + 3];
+                    //    }
+                    //}
                 }
                 else
                 {
@@ -891,9 +968,10 @@ void AddAsmDirEntry(string DirEntry) {
                 }
             }
 
-            if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] == 0)
+            Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = FileType;          //Always overwrite FileType
+
+            if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] == 0)            //Only update T:S of entry if none exits
             {
-                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = FileType;
                 Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
                 Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
             }
@@ -1635,18 +1713,30 @@ bool ImportFromImage()
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
-void FindLastUsedDirPos()
+bool FindLastUsedDirPos()
 {
-    //First find the last used sector
-    while ((Disk[Track[DirTrack] + (DirSector * 256) + 0] == 18) && (Disk[Track[DirTrack] + (DirSector * 256) + 1] != 0) && (Disk[Track[DirTrack] + (DirSector * 256) + 1] != 255))
+    //Check if the BAM shows free sectors on track 18
+    if (Disk[Track[DirTrack] + (size_t)(18 * 4)] == 0)
     {
-        unsigned char S = Disk[Track[DirTrack] + (DirSector * 256) + 1];
-
-        //DirTrack = T        'DART assumes that we keep the directory on track 18...
-        DirSector = S;
+        cerr << "***CRITICAL***Track 18 is full. DART is unable to append to this directory.\n";
+        return false;
 
     }
+   
+    //First find the last used directory sector
+    while (Disk[Track[DirTrack] + (DirSector * 256) + 0] != 0)
+    {
+        DirTrack = Disk[Track[DirTrack] + (DirSector * 256) + 0];
+        DirSector = Disk[Track[DirTrack] + (DirSector * 256) + 1];
 
+        if (DirTrack != 18)
+        {
+            cerr << "***CRITICAL***The directory on this disk extends beyond track 18. DART only supports directories on track 18.\n";
+            return false;
+        }
+
+    }
+    
     Disk[Track[DirTrack] + (DirSector * 256) + 0] = 0;
     Disk[Track[DirTrack] + (DirSector * 256) + 1] = 255;
 
@@ -1662,34 +1752,41 @@ void FindLastUsedDirPos()
             break;
         }
     }
+    return true;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
 void FixSparkleBAM()
 {
-    //Earlier versions of Sparkle disks don't mark DirArt sectors as "used". So let's follow the directory block chain and mark them off
     DirTrack = 18;
     DirSector = 1;
 
-    while (Disk[Track[DirTrack] + (DirSector * 256)] != 0)
+    //Earlier versions of Sparkle disks don't mark DirArt sectors as "used" in the BAM. So let's follow the directory block chain and mark them off
+    while (Disk[Track[DirTrack] + (DirSector * 256) + 0] != 0)
     {
-        DeleteBit(DirTrack, DirSector);
-        int NextT = Disk.at(Track[DirTrack] + (DirSector * 256));
-        int NextS = Disk.at(Track[DirTrack] + (DirSector * 256) + 1);
+        int NextT = Disk[Track[DirTrack] + (DirSector * 256) + 0];
+        int NextS = Disk[Track[DirTrack] + (DirSector * 256) + 1];
 
-        if (NextT == 18)
+        if ((NextT == 18) && (NextS == 0))  //Sparkle 1.x marked last secter in chain with 12:00 instead of 00:FF
         {
-            if (NextS == 0)
-            {
-                break;
-            }
+            break;
+        }
+        else
+        {
+            MarkSectorAsUsed(DirTrack, DirSector);
             DirTrack = NextT;
             DirSector = NextS;
         }
     }
-    //Also mark last sector as used and correct first two bytes of last sector
-    DeleteBit(DirTrack, DirSector);
+
+    //Mark last sector as used if there is at least one dir entry (this will avoid marking the first sector off if the dir is completely empty)
+    if (Disk[Track[DirTrack] + (DirSector * 256) + 2] != 0)
+    {
+        MarkSectorAsUsed(DirTrack, DirSector);
+    }
+
+    //Correct first two bytes of last sector
     Disk[Track[DirTrack] + (DirSector * 256) + 0] = 0;
     Disk[Track[DirTrack] + (DirSector * 256) + 1] = 0xff;
 
@@ -1709,8 +1806,8 @@ void FixSparkleBAM()
         (Disk[Track[DirTrack] + (DirSector * 256) + 253] == 0x00)))
     {
         //Sparkle 2.0 or Sparkle 2.1+ disk -> mark 18:17 and 18:18 off (internal directory sectors)
-        DeleteBit(18, 17);
-        DeleteBit(18, 18);
+        MarkSectorAsUsed(18, 17);
+        MarkSectorAsUsed(18, 18);
     }
 }
 
@@ -1824,10 +1921,13 @@ void ShowInfo()
     cout << "Usage:\n";
     cout << "------\n";
     cout << "dart input[+] [output.d64]\n\n";
-    cout << "By default, DART will overwrite any existing directory entries in output.d64 without modifying the entries' type.\n";
+    cout << "By default, DART will replace any existing old directory in the output file with the new, imported one. Entry types\n";
+    cout << "will only be updated if the input file contains this information (D64, ASM). If none defined then DEL will be used.\n";
     cout << "To append the imported DirArt to the existing directory entries without overwriting them, mark the input file with a\n";
     cout << "plus sign (e.g., input.d64+, see example below). Thus, multiple DirArts can be imported in the same D64 as long as\n";
-    cout << "there is space on track 18.\n\n";
+    cout << "there is space on track 18. DART does not support directories extending beyond track 18.\n\n";
+    cout << "DART doesn't import the directory's header and ID. The input file must only consist of the directory entries (with\n";
+    cout << "the exception of D64 files where the directory header and ID will be ignored).\n\n";
     cout << "The [output.d64] parameter is optional. If not specified, DART will create an input_out.d64 file.\n\n";
     cout << "Accepted input file types:\n";
     cout << "--------------------------\n";
@@ -1861,10 +1961,6 @@ void ShowInfo()
     cout << "       must display the uppercase charset and their appearance cannot rely on command characters.\n\n";
     cout << "BMP  - Bitmap image file. Same rules and limitations as with PNGs.\n\n";
     cout << "Any other file type will be handled as a binary file and will be treated as PRGs without the first two header bytes.\n\n";
-    cout << "Limitations:\n";
-    cout << "------------\n";
-    cout << "DART doesn't import the directory's header and ID. The input file must only consist of the directory entries (with\n";
-    cout << "the exception of D64 files where the directory header and ID will be ignored).\n\n";
     cout << "Example 1:\n";
     cout << "----------\n\n";
     cout << "dart MyDirArt.d64\n\n";
@@ -1893,10 +1989,10 @@ int main(int argc, char* argv[])
     {
 
     #ifdef DEBUG
-        InFileName = "c:\\Users\\Tamas\\OneDrive\\C64\\C++\\dart\\test\\Bin2.bin+";
-    #else
+        InFileName = "test/Prg3.prg";
+#else
 
-        cout << "Usage: dart input[*] [output.d64]\n\n";
+        cout << "Usage: dart input[+] [output.d64]\n\n";
         cout << "Help:  dart -?\n";
         return EXIT_SUCCESS;
 
@@ -1927,7 +2023,7 @@ int main(int argc, char* argv[])
 
     if (InFileName.at(InFileName.size() - 1) == '+')
     {
-        AppendDir = true;
+        AppendMode = true;
         InFileName = InFileName.substr(0, InFileName.size() - 1);
     }
 
@@ -1995,17 +2091,18 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
-    FixSparkleBAM();
+    FixSparkleBAM();        //Earlier Sparkle versions didn't mark DirArt and internal directory sectors off in the BAM
 
     DirTrack = 18;
     DirSector = 1;
-    DirPos = 0;          //This will allow to start with the very first dir slot in overwrite mode
+    DirPos = 0;             //This will allow to start with the very first dir slot in overwrite mode
 
-    if (AppendDir)
+    if (AppendMode)
     {
         cout << "Import mode: Append\n";
-        //Lets find the last used dir slot, we will continue with the next, empty one
-        FindLastUsedDirPos();
+        //Lets find the last used dir entry slot, we will continue with the next, empty one
+        if (!FindLastUsedDirPos())
+            return EXIT_FAILURE;
     }
     else
     {
@@ -2069,14 +2166,32 @@ int main(int argc, char* argv[])
     else
     {
         cout << "Importing DirArt from binary file...\n";
-        if (!ImportFromBinary())          //Import from any other file, first 16 bytes of each 40 or until 0xa0 character found
+        if (!ImportFromBinary())            //Import from any other file, first 16 bytes of each 40 or until 0xa0 character found
             return EXIT_FAILURE;
     }
     
+    if (!AppendMode)
+    {
+        DeleteOldDir();                     //Free up unused dir sectors from old T:S chain in Overwrite Mode
+    }
+
     if (!WriteDiskImage(OutFileName))
     {
         return EXIT_FAILURE;
     }
+
+    int NumFreeSectors = Disk[Track[DirTrack] + (size_t)(18 * 4)];
+    int NumFreeEntries = NumFreeSectors * 8;
+
+    if (DirPos != 0)
+    {
+        for (int i = DirPos; i < 256; i += 32)
+        {
+            NumFreeEntries++;
+        }
+    }
+
+    cout << dec << NumFreeEntries << " directory entries remaining unused on track 18.\n";
 
     return EXIT_SUCCESS;
 }
