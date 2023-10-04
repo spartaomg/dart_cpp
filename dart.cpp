@@ -353,6 +353,7 @@ void FindNextEmptyDirSector()
     DirSector = 0;
     DirPos = 0;
     cout << "***INFO***\tDirectory is full.\n";
+    return;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -407,6 +408,50 @@ void FindNextDirPos() {
     }
 }
 
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+bool FindLastUsedDirPos()
+{
+    //Check if the BAM shows free sectors on track 18
+    if (Disk[Track[DirTrack] + (size_t)(18 * 4)] == 0)
+    {
+        cerr << "***CRITICAL***Track 18 is full. DART is unable to append to this directory.\n";
+        return false;
+
+    }
+
+    //First find the last used directory sector
+    while (Disk[Track[DirTrack] + (DirSector * 256) + 0] != 0)
+    {
+        DirTrack = Disk[Track[DirTrack] + (DirSector * 256) + 0];
+        DirSector = Disk[Track[DirTrack] + (DirSector * 256) + 1];
+
+        if (DirTrack != 18)
+        {
+            cerr << "***CRITICAL***The directory on this disk extends beyond track 18. DART only supports directories on track 18.\n";
+            return false;
+        }
+
+    }
+
+    Disk[Track[DirTrack] + (DirSector * 256) + 0] = 0;
+    Disk[Track[DirTrack] + (DirSector * 256) + 1] = 255;
+
+    //Then find last used dir entry slot
+    DirPos = (7 * 32) + 2;
+
+    while (Disk[Track[DirTrack] + (DirSector * 256) + DirPos] == 0)
+    {
+        DirPos -= 32;
+        if (DirPos < 0)
+        {
+            DirPos = 0;
+            break;
+        }
+    }
+    return true;
+}
+
 //----------------------------------------------------------------------------------------------------------------------------------------------------------
 
 void DeleteOldDir()
@@ -416,22 +461,180 @@ void DeleteOldDir()
     int NextT = Disk[Track[DirTrack] + (DirSector * 256) + 0];
     int NextS = Disk[Track[DirTrack] + (DirSector * 256) + 1];
 
+    Disk[Track[DirTrack] + (DirSector * 256) + 0] = 0;
+    Disk[Track[DirTrack] + (DirSector * 256) + 1] = 0xff;
+
     while (NextT != 0)
     {
-        Disk[Track[DirTrack] + (DirSector * 256) + 0] = 0;
-        Disk[Track[DirTrack] + (DirSector * 256) + 1] = 0xff;
-
         DirTrack = NextT;
         DirSector = NextS;
         
         NextT = Disk[Track[DirTrack] + (DirSector * 256) + 0];
         NextS = Disk[Track[DirTrack] + (DirSector * 256) + 1];
 
-        for (int i = 2; i < 256; i++)
+        for (int i = 0; i < 256; i++)
         {
             Disk[Track[DirTrack] + (DirSector * 256) + i] = 0;
         }
         MarkSectorAsFree(DirTrack, DirSector);
+    }
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+void CreateDisk()
+{
+    size_t CP = Track[18];
+
+    DiskSize = StdDiskSize;
+
+    Disk.resize(StdDiskSize, 0);
+
+    Disk[CP + 0] = 0x12;        //Track 18
+    Disk[CP + 1] = 0x01;        //Sector 1
+    Disk[CP + 2] = 0x41;        //'A"
+
+    for (size_t i = 0x90; i < 0xab; i++)        //Name, ID, DOS type
+    {
+        Disk[CP + i] = 0xa0;
+    }
+
+    for (size_t i = 4; i < ((size_t)36 * 4); i++)
+    {
+        Disk[CP + i] = 0xff;
+    }
+
+    for (size_t i = 1; i < 18; i++)
+    {
+        Disk[CP + (i * 4) + 0] = 21;
+        Disk[CP + (i * 4) + 3] = 31;
+    }
+
+    for (size_t i = 18; i < 25; i++)
+    {
+        Disk[CP + (i * 4) + 0] = 19;
+        Disk[CP + (i * 4) + 3] = 7;
+    }
+
+    for (size_t i = 25; i < 31; i++)
+    {
+        Disk[CP + (i * 4) + 0] = 18;
+        Disk[CP + (i * 4) + 3] = 3;
+    }
+
+    for (size_t i = 31; i < 36; i++)
+    {
+        Disk[CP + (i * 4) + 0] = 17;
+        Disk[CP + (i * 4) + 3] = 1;
+    }
+
+    Disk[CP + ((size_t)18 * 4) + 0] = 18;
+    Disk[CP + ((size_t)18 * 4) + 1] = 252;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+void FixSparkleBAM()
+{
+    DirTrack = 18;
+    DirSector = 1;
+
+    //Earlier versions of Sparkle disks don't mark DirArt sectors as "used" in the BAM. So let's follow the directory block chain and mark them off
+    while (Disk[Track[DirTrack] + (DirSector * 256) + 0] != 0)
+    {
+        int NextT = Disk[Track[DirTrack] + (DirSector * 256) + 0];
+        int NextS = Disk[Track[DirTrack] + (DirSector * 256) + 1];
+
+        if ((NextT == 18) && (NextS == 0))  //Sparkle 1.x marked last secter in chain with 12:00 instead of 00:FF
+        {
+            break;
+        }
+        else
+        {
+            MarkSectorAsUsed(DirTrack, DirSector);
+            DirTrack = NextT;
+            DirSector = NextS;
+        }
+    }
+
+    //Mark last sector as used if there is at least one dir entry (this will avoid marking the first sector off if the dir is completely empty)
+    if (Disk[Track[DirTrack] + (DirSector * 256) + 2] != 0)
+    {
+        MarkSectorAsUsed(DirTrack, DirSector);
+    }
+
+    //Correct first two bytes of last sector
+    Disk[Track[DirTrack] + (DirSector * 256) + 0] = 0;
+    Disk[Track[DirTrack] + (DirSector * 256) + 1] = 0xff;
+
+    //Sparkle 2 and 2.1 disks don't mark the internal directory sectors (18:17 and 18:18) off, let's fix it.
+    //Sparkle 2.0 dir(0) = $f7 $ff $73 $00
+    //Sparkle 2.1 dir(0) = $77 $7f $63 $00 
+
+    DirTrack = 18;
+    DirSector = 17;
+    if (((Disk[Track[DirTrack] + (DirSector * 256) + 0] == 0xf7) &&
+        (Disk[Track[DirTrack] + (DirSector * 256) + 255] == 0xff) &&
+        (Disk[Track[DirTrack] + (DirSector * 256) + 254] == 0x73) &&
+        (Disk[Track[DirTrack] + (DirSector * 256) + 253] == 0x00)) ||
+        ((Disk[Track[DirTrack] + (DirSector * 256) + 0] == 0x77) &&
+            (Disk[Track[DirTrack] + (DirSector * 256) + 255] == 0x7f) &&
+            (Disk[Track[DirTrack] + (DirSector * 256) + 254] == 0x63) &&
+            (Disk[Track[DirTrack] + (DirSector * 256) + 253] == 0x00)))
+    {
+        //Sparkle 2.0 or Sparkle 2.1+ disk -> mark 18:17 and 18:18 off (internal directory sectors)
+        MarkSectorAsUsed(18, 17);
+        MarkSectorAsUsed(18, 18);
+    }
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+bool OpenOutFile()
+{
+
+    DiskSize = ReadBinaryFile(OutFileName, Disk);   //Load the output file if it exists
+
+    if (DiskSize < 0)
+    {
+        //Output file doesn't exits, create an empty D64
+        CreateDisk();
+    }
+    else if ((DiskSize != StdDiskSize) && (DiskSize != ExtDiskSize))    //Otherwise make sure the output disk is the correct size
+    {
+        cerr << "***CRITICAL***\t Invalid output disk file size!\n";
+        return false;
+    }
+
+    FixSparkleBAM();        //Earlier Sparkle versions didn't mark DirArt and internal directory sectors off in the BAM
+
+    DirTrack = 18;
+    DirSector = 1;
+    DirPos = 0;             //This will allow to start with the very first dir slot in overwrite mode
+
+    return true;
+
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+void CorrectFilePathSeparators()
+{
+
+    for (size_t i = 0; i < InFileName.size(); i++)
+    {
+        if (InFileName[i] == '\\')
+        {
+            InFileName.replace(i, 1, "/");     //Replace '\' with '/' in file paths, Windows can also handle this
+        }
+    }
+
+    for (size_t i = 0; i < OutFileName.size(); i++)
+    {
+        if (OutFileName[i] == '\\')
+        {
+            OutFileName.replace(i, 1, "/");     //Replace '\' with '/' in file paths, Windows can also handle this
+        }
     }
 }
 
@@ -472,33 +675,43 @@ bool ImportFromD64()
 
                 if (DirPos != 0)
                 {
-                    //if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] == 0)
-                    //{
-                        //File type and T:S are not yet defined
-                        for (int i = 0; i < (16 + 3); i++)     //Include file type and T:S
-                        {
-                            Disk[Track[DirTrack] + (DirSector * 256) + DirPos + i] = DA[DAPtr + b + i];
-                        }
-                    //}
-                    //else
-                    //{
-                    //    //File type and T:S are already defined
-                    //    for (int i = 0; i < 16; i++)        //Do not include file type and T:S
-                    //    {
-                    //        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + i + 3] = DA[DAPtr + b + i + 3];
-                    //    }
-                    //}
+                    for (int i = 0; i < 30; i++)     //Include file type and T:S, as well as file size
+                    {
+                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + i] = DA[DAPtr + b + i];
+                    }
                 }
                 else
                 {
-                    //DirFull = true;
-                    //break;
                     return true;
                 }
             }
         }
         T = DA[DAPtr];
         S = DA[DAPtr + 1];
+    }
+
+    //Import directory header only if one exists in input disk image but none in the output disk image or we are in Overwrite mode
+    if (DA[Track[18] + 0x90] != 0xa0)
+    {
+        if ((!AppendMode) || (Disk[Track[18] + 0x90] == 0xa0))
+        {
+            for (int i = 0; i < 16; i++)
+            {
+                Disk[Track[18] + 0x90 + i] = DA[Track[18] + 0x90 + i];
+            }
+        }
+    }
+
+    //Import directory ID only if one exists in input disk image but none in the output disk image or we are in Overwrite mode
+    if (DA[Track[18] + 0xa2] != 0xa0)
+    {
+        if ((!AppendMode) || (Disk[Track[18] + 0xa2] == 0xa0))
+        {
+            for (int i = 0; i < 5; i++)
+            {
+                Disk[Track[18] + 0xa2 + i] = DA[Track[18] + 0xa2 + i];
+            }
+        }
     }
 
     return true;
@@ -508,7 +721,7 @@ bool ImportFromD64()
 //  IMPORT FROM TXT
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
-void AddDirEntry(string DirEntry) {
+void AddTxtDirEntry(string TxtDirEntry) {
 
     //Define file type and T:S if not yet denifed
     if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] == 0)
@@ -521,13 +734,13 @@ void AddDirEntry(string DirEntry) {
     //Remove vbNewLine characters and add 16 SHIFT+SPACE tail characters
     for (int i = 0; i < 16; i++)
     {
-        DirEntry += 0xa0;
+        TxtDirEntry += 0xa0;
     }
 
-    //Copy only the first 16 characters of the edited DirEntry to the Disk Directory
+    //Copy only the first 16 characters of the edited TxtDirEntry to the Disk Directory
     for (int i = 0; i < 16; i++)
     {
-        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = Ascii2DirArt[toupper(DirEntry[i])];    //=toupper(DirEntry[i]);
+        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = Ascii2DirArt[toupper(TxtDirEntry[i])];
     }
 
 }
@@ -537,7 +750,7 @@ void AddDirEntry(string DirEntry) {
 bool ImportFromTxt()
 {
 
-    string DirArt = ReadFileToString(InFileName);
+    DirArt = ReadFileToString(InFileName);
 
     if (DirArt == "")
     {
@@ -549,12 +762,12 @@ bool ImportFromTxt()
 
     while (DirArt.find(delimiter) != string::npos)
     {
-        string DirEntry = DirArt.substr(0, DirArt.find(delimiter));
+        DirEntry = DirArt.substr(0, DirArt.find(delimiter));
         DirArt.erase(0, DirArt.find(delimiter) + delimiter.length());
         FindNextDirPos();
         if (DirPos != 0)
         {
-            AddDirEntry(DirEntry);
+            AddTxtDirEntry(DirEntry);
         }
         else
         {
@@ -567,7 +780,7 @@ bool ImportFromTxt()
         FindNextDirPos();
         if (DirPos != 0)
         {
-            AddDirEntry(DirArt);
+            AddTxtDirEntry(DirArt);
         }
     }
 
@@ -879,7 +1092,12 @@ bool ImportFromCArray() {
 //  IMPORT FROM ASM
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
-void AddAsmDirEntry(string DirEntry) {
+bool AddAsmDirEntry(string AsmDirEntry)
+{
+    for (size_t i = 0; i < DirEntry.length(); i++)
+    {
+        DirEntry[i] = tolower(DirEntry[i]);
+    }
 
     string EntrySegments[5];
     string delimiter = "\"";        // = " (entry gets split at quotation mark) NOT A BUG, DO NOT CHANGE THIS
@@ -890,12 +1108,12 @@ void AddAsmDirEntry(string DirEntry) {
         EntrySegments[i] = "";
     }
 
-    while ((DirEntry.find(delimiter) != string::npos) && (NumSegments < 4))
+    while ((AsmDirEntry.find(delimiter) != string::npos) && (NumSegments < 4))
     {
-        EntrySegments[NumSegments++] = DirEntry.substr(0, DirEntry.find(delimiter));
-        DirEntry.erase(0, DirEntry.find(delimiter) + delimiter.length());
+        EntrySegments[NumSegments++] = AsmDirEntry.substr(0, AsmDirEntry.find(delimiter));
+        AsmDirEntry.erase(0, AsmDirEntry.find(delimiter) + delimiter.length());
     }
-    EntrySegments[NumSegments++] = DirEntry;
+    EntrySegments[NumSegments++] = AsmDirEntry;
 
     //EntrySegments[0] = '[name =' OR '[name = @'
     //EntrySegments[1] = 'text' OR '\$XX\$XX\$XX'
@@ -968,98 +1186,255 @@ void AddAsmDirEntry(string DirEntry) {
                 }
             }
 
-            Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = FileType;          //Always overwrite FileType
-
-            if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] == 0)            //Only update T:S of entry if none exits
+            FindNextDirPos();
+            
+            if (DirPos != 0)
             {
-                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
-                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
-            }
 
-            if (EntrySegments[0].find("@") != string::npos)
-            {
-                //Numeric entry
-                unsigned char Entry[16];
-                string Values[16];
+                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = FileType;          //Always overwrite FileType
 
-                //Fill array with 16 SHIFT+SPACE characters
-                fill_n(Entry, 16, 0xa0);
-                fill_n(Values, 16, "");
-
-                int NumValues = 0;
-                delimiter = "\\";
-                while ((EntrySegments[1].find(delimiter) != string::npos) && (NumValues < 15))
+                if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] == 0)            //Only update T:S of entry if none exits
                 {
-                    string ThisValue = EntrySegments[1].substr(0, EntrySegments[1].find(delimiter));
-                    if (ThisValue != "")
-                    {
-                        Values[NumValues++] = ThisValue;
-                    }
-                    EntrySegments[1].erase(0, EntrySegments[1].find(delimiter) + delimiter.length());
+                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
+                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
                 }
-                Values[NumValues++] = EntrySegments[1];
 
-                int Idx = 0;
-
-                for (int v = 0; v < NumValues; v++)
+                if (EntrySegments[0].find("@") != string::npos)
                 {
-                    if (Values[v] != "")
+                    //Numeric entry
+                    unsigned char Entry[16];
+                    string Values[16];
+
+                    //Fill array with 16 SHIFT+SPACE characters
+                    fill_n(Entry, 16, 0xa0);
+                    fill_n(Values, 16, "");
+
+                    int NumValues = 0;
+                    delimiter = "\\";
+                    while ((EntrySegments[1].find(delimiter) != string::npos) && (NumValues < 15))
                     {
-                        unsigned char NextChar = 0x20;          //SPACE default char - if conversion is not possible
-                        if (Values[v].find("$") == 0)
+                        string ThisValue = EntrySegments[1].substr(0, EntrySegments[1].find(delimiter));
+                        if (ThisValue != "")
                         {
-                            //Hex Entry
-                            Values[v].erase(0, 1);
-                            if (IsHexString(Values[v]))
+                            Values[NumValues++] = ThisValue;
+                        }
+                        EntrySegments[1].erase(0, EntrySegments[1].find(delimiter) + delimiter.length());
+                    }
+                    Values[NumValues++] = EntrySegments[1];
+
+                    int Idx = 0;
+
+                    for (int v = 0; v < NumValues; v++)
+                    {
+                        if (Values[v] != "")
+                        {
+                            unsigned char NextChar = 0x20;          //SPACE default char - if conversion is not possible
+                            if (Values[v].find("$") == 0)
                             {
-                                NextChar = ConvertHexStringToInt(Values[v]);
+                                //Hex Entry
+                                Values[v].erase(0, 1);
+                                if (IsHexString(Values[v]))
+                                {
+                                    NextChar = ConvertHexStringToInt(Values[v]);
+                                }
+                                else
+                                {
+                                    break;
+                                }
                             }
                             else
+                            {
+                                //Decimal Entry
+                                if (IsNumeric(Values[v]))
+                                {
+                                    NextChar = ConvertStringToInt(Values[v]);
+                                }
+                                else
+                                {
+                                    break;
+                                }
+                            }
+                            Entry[Idx++] = NextChar;
+                            if (Idx == 16)
                             {
                                 break;
                             }
                         }
-                        else
-                        {
-                            //Decimal Entry
-                            if (IsNumeric(Values[v]))
-                            {
-                                NextChar = ConvertStringToInt(Values[v]);
-                            }
-                            else
-                            {
-                                break;
-                            }
-                        }
-                        Entry[Idx++] = NextChar;
-                        if (Idx == 16)
-                        {
-                            break;
-                        }
+                    }
+                    for (size_t i = 0; i < 16; i++)
+                    {
+                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = Entry[i];
                     }
                 }
-                for (size_t i = 0; i < 16; i++)
+                else
                 {
-                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = Entry[i];
+                    //Text Entry, pad it with inverted space
+                    //Fill the slot first with $A0
+                    for (size_t i = 0; i < 16; i++)
+                    {
+                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = 0xa0;
+                    }
+                    string ThisEntry = EntrySegments[1];
+                    for (size_t i = 0; (i < ThisEntry.length()) && (i < 16); i++)
+                    {
+                        unsigned char NextChar = toupper(ThisEntry[i]);
+                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = Ascii2DirArt[NextChar];
+                    }
                 }
             }
             else
             {
-                //Text Entry, pad it with inverted space
-                //Fill the slot first with $A0
-                for (size_t i = 0; i < 16; i++)
-                {
-                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = 0xa0;
-                }
-                string ThisEntry = EntrySegments[1];
-                for (size_t i = 0; (i < ThisEntry.length()) && (i < 16); i++)
-                {
-                    unsigned char NextChar = toupper(ThisEntry[i]);
-                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = Ascii2DirArt[NextChar];
-                }
+                return false;
             }
         }
     }
+
+    return true;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+bool AddAsmDiskParameters()
+{
+    bool QuoteOn = false;
+    for (size_t i = 0; i < DirEntry.length(); i++)
+    {
+        if (DirEntry[i] == '\"')
+        {
+            QuoteOn = !QuoteOn;
+        }
+        else if (!QuoteOn)
+        {
+            DirEntry[i] = tolower(DirEntry[i]);
+        }
+    }
+
+    string DiskName = "";
+    string delimiter = "filename";
+
+    if (DirEntry.find(delimiter) != string::npos)
+    {
+        DiskName = DirEntry;
+        DiskName.erase(0, DiskName.find(delimiter) + delimiter.length());
+        DirEntry.erase(DirEntry.find(delimiter), DirEntry.find(delimiter) + delimiter.length());
+        
+        if (DiskName.find("\"") != string::npos)
+        {
+            DiskName = DiskName.substr(DiskName.find("\"") + 1);
+            if (DiskName.find("\"") != string::npos)
+            {
+                DiskName = DiskName.substr(0, DiskName.find("\""));
+            }
+            else
+            {
+                DiskName = "";
+            }
+        }
+        else
+        {
+            DiskName = "";
+        }
+    }
+
+    if (DiskName != "")
+    {
+        OutFileName = DiskName;
+
+        CorrectFilePathSeparators();        //Replace "\" with "/" which is recognized by Windows as well
+
+        if (!OpenOutFile())
+            return false;
+
+        if (AppendMode)
+        {
+            if (!FindLastUsedDirPos())
+                return false;
+        }
+    }
+
+    string DirHeader = "";
+    delimiter = "name";
+    if (DirEntry.find(delimiter) != string::npos)
+    {
+        DirHeader = DirEntry;
+        DirHeader.erase(0, DirHeader.find(delimiter) + delimiter.length());
+        
+        if (DirHeader.find("\"") != string::npos)
+        {
+            DirHeader = DirHeader.substr(DirHeader.find("\"") + 1);
+            if (DirHeader.find("\"") != string::npos)
+            {
+                DirHeader = DirHeader.substr(0, DirHeader.find("\""));
+            }
+            else
+            {
+                DirHeader = "";
+            }
+        }
+        else
+        {
+            DirHeader = "";
+        }
+    }
+
+    if (DirHeader != "")
+    {
+        if ((!AppendMode) || (Disk[Track[18] + 0x90] == 0xa0))
+        {
+        for (size_t i = 0; i < 16; i++)
+            if (i < DirHeader.size())
+            {
+                Disk[Track[18] + 0x90 + i] = Ascii2DirArt[toupper(DirHeader[i])];
+            }
+            else
+            {
+                Disk[Track[18] + 0x90 + i] = 0xa0;
+            }
+        }
+    }
+
+    string DirID = "";
+    delimiter = "id";
+    if (DirEntry.find(delimiter) != string::npos)
+    {
+        DirID = DirEntry;
+        DirID.erase(0, DirID.find(delimiter) + delimiter.length());
+
+        if (DirID.find("\"") != string::npos)
+        {
+            DirID = DirID.substr(DirID.find("\"") + 1);
+            if (DirID.find("\"") != string::npos)
+            {
+                DirID = DirID.substr(0, DirID.find("\""));
+            }
+            else
+            {
+                DirID = "";
+            }
+        }
+        else
+        {
+            DirID = "";
+        }
+    }
+
+    if (DirID != "")
+    {
+        if ((!AppendMode) || (Disk[Track[18] + 0xa2] == 0xa0))
+        {
+            for (size_t i = 0; i < 5; i++)
+            if (i < DirID.size())
+            {
+                Disk[Track[18] + 0xa2 + i] = Ascii2DirArt[toupper(DirID[i])];
+            }
+            else
+            {
+                Disk[Track[18] + 0xa2 + i] = 0xa0;
+            }
+        }
+    }
+
+    return true;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
@@ -1076,25 +1451,28 @@ bool ImportFromAsm()
     }
 
     //Convert the whole string to lower case for easier processing
-    for (size_t i = 0; i < DirArt.length(); i++)
-    {
-        DirArt[i] = tolower(DirArt[i]);
-    }
-
     string delimiter = "\n";
 
     while (DirArt.find(delimiter) != string::npos)
     {
-        string DirEntry = DirArt.substr(0, DirArt.find(delimiter));
+        DirEntry = DirArt.substr(0, DirArt.find(delimiter));
         DirArt.erase(0, DirArt.find(delimiter) + delimiter.length());
-        FindNextDirPos();
-        if (DirPos != 0)
+        string EntryType = DirEntry.substr(0, DirEntry.find("["));
+
+        for (size_t i = 0; i < EntryType.length(); i++)
         {
-            AddAsmDirEntry(DirEntry);   //Convert one line at the time
+            EntryType[i] = tolower(EntryType[i]);
+        }
+        
+        if (EntryType.find(".disk") != string::npos)
+        {
+            if (!AddAsmDiskParameters())
+                return false;
         }
         else
         {
-            return true;
+            if (!AddAsmDirEntry(DirEntry))   //Convert one line at the time
+                return true;
         }
     }
 
@@ -1713,158 +2091,6 @@ bool ImportFromImage()
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
-bool FindLastUsedDirPos()
-{
-    //Check if the BAM shows free sectors on track 18
-    if (Disk[Track[DirTrack] + (size_t)(18 * 4)] == 0)
-    {
-        cerr << "***CRITICAL***Track 18 is full. DART is unable to append to this directory.\n";
-        return false;
-
-    }
-   
-    //First find the last used directory sector
-    while (Disk[Track[DirTrack] + (DirSector * 256) + 0] != 0)
-    {
-        DirTrack = Disk[Track[DirTrack] + (DirSector * 256) + 0];
-        DirSector = Disk[Track[DirTrack] + (DirSector * 256) + 1];
-
-        if (DirTrack != 18)
-        {
-            cerr << "***CRITICAL***The directory on this disk extends beyond track 18. DART only supports directories on track 18.\n";
-            return false;
-        }
-
-    }
-    
-    Disk[Track[DirTrack] + (DirSector * 256) + 0] = 0;
-    Disk[Track[DirTrack] + (DirSector * 256) + 1] = 255;
-
-    //Then find last used dir entry slot
-    DirPos = (7 * 32) + 2;
-
-    while (Disk[Track[DirTrack] + (DirSector * 256) + DirPos] == 0)
-    {
-        DirPos -= 32;
-        if (DirPos < 0)
-        {
-            DirPos = 0;
-            break;
-        }
-    }
-    return true;
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------------------------
-
-void FixSparkleBAM()
-{
-    DirTrack = 18;
-    DirSector = 1;
-
-    //Earlier versions of Sparkle disks don't mark DirArt sectors as "used" in the BAM. So let's follow the directory block chain and mark them off
-    while (Disk[Track[DirTrack] + (DirSector * 256) + 0] != 0)
-    {
-        int NextT = Disk[Track[DirTrack] + (DirSector * 256) + 0];
-        int NextS = Disk[Track[DirTrack] + (DirSector * 256) + 1];
-
-        if ((NextT == 18) && (NextS == 0))  //Sparkle 1.x marked last secter in chain with 12:00 instead of 00:FF
-        {
-            break;
-        }
-        else
-        {
-            MarkSectorAsUsed(DirTrack, DirSector);
-            DirTrack = NextT;
-            DirSector = NextS;
-        }
-    }
-
-    //Mark last sector as used if there is at least one dir entry (this will avoid marking the first sector off if the dir is completely empty)
-    if (Disk[Track[DirTrack] + (DirSector * 256) + 2] != 0)
-    {
-        MarkSectorAsUsed(DirTrack, DirSector);
-    }
-
-    //Correct first two bytes of last sector
-    Disk[Track[DirTrack] + (DirSector * 256) + 0] = 0;
-    Disk[Track[DirTrack] + (DirSector * 256) + 1] = 0xff;
-
-    //Sparkle 2 and 2.1 disks don't mark the internal directory sectors (18:17 and 18:18) off, let's fix it.
-    //Sparkle 2.0 dir(0) = $f7 $ff $73 $00
-    //Sparkle 2.1 dir(0) = $77 $7f $63 $00 
-    
-    DirTrack = 18;
-    DirSector = 17;
-    if(((Disk[Track[DirTrack] + (DirSector * 256) + 0] == 0xf7) &&
-        (Disk[Track[DirTrack] + (DirSector * 256) + 255] == 0xff) &&
-        (Disk[Track[DirTrack] + (DirSector * 256) + 254] == 0x73) &&
-        (Disk[Track[DirTrack] + (DirSector * 256) + 253] == 0x00)) ||
-        ((Disk[Track[DirTrack] + (DirSector * 256) + 0] == 0x77) &&
-        (Disk[Track[DirTrack] + (DirSector * 256) + 255] == 0x7f) &&
-        (Disk[Track[DirTrack] + (DirSector * 256) + 254] == 0x63) &&
-        (Disk[Track[DirTrack] + (DirSector * 256) + 253] == 0x00)))
-    {
-        //Sparkle 2.0 or Sparkle 2.1+ disk -> mark 18:17 and 18:18 off (internal directory sectors)
-        MarkSectorAsUsed(18, 17);
-        MarkSectorAsUsed(18, 18);
-    }
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------------------------
-
-void CreateDisk()
-{
-    size_t CP = Track[18];
-    
-    DiskSize = StdDiskSize;
-    
-    Disk.resize(StdDiskSize, 0);
-
-    Disk[CP + 0] = 0x12;        //Track 18
-    Disk[CP + 1] = 0x01;        //Sector 1
-    Disk[CP + 2] = 0x41;        //'A"
-
-    for (size_t i = 0x90; i < 0xab; i++)        //Name, ID, DOS type
-    {
-        Disk[CP + i] = 0xa0;
-    }
-
-    for (size_t i = 4; i < ((size_t)36 * 4); i++)
-    {
-        Disk[CP + i] = 0xff;
-    }
-
-    for (size_t i = 1; i < 18; i++)
-    {
-        Disk[CP + (i * 4) + 0] = 21;
-        Disk[CP + (i * 4) + 3] = 31;
-    }
-
-    for (size_t i = 18; i < 25; i++)
-    {
-        Disk[CP + (i * 4) + 0] = 19;
-        Disk[CP + (i * 4) + 3] = 7;
-    }
-
-    for (size_t i = 25; i < 31; i++)
-    {
-        Disk[CP + (i * 4) + 0] = 18;
-        Disk[CP + (i * 4) + 3] = 3;
-    }
-
-    for (size_t i = 31; i < 36; i++)
-    {
-        Disk[CP + (i * 4) + 0] = 17;
-        Disk[CP + (i * 4) + 3] = 1;
-    }
-
-    Disk[CP + ((size_t)18 * 4) + 0] = 18;
-    Disk[CP + ((size_t)18 * 4) + 1] = 252;
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------------------------
-
 void CreateTrackTable()
 {
 
@@ -1893,45 +2119,28 @@ void CreateTrackTable()
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
-void CorrectFilePathSeparators()
-{
-
-    for (size_t i = 0; i < InFileName.size(); i++)
-    {
-        if (InFileName[i] == '\\')
-        {
-            InFileName.replace(i, 1, "/");     //Replace '\' with '/' in file paths, Windows can also handle this
-        }
-    }
-
-    for (size_t i = 0; i < OutFileName.size(); i++)
-    {
-        if (OutFileName[i] == '\\')
-        {
-            OutFileName.replace(i, 1, "/");     //Replace '\' with '/' in file paths, Windows can also handle this
-        }
-    }
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------------------------
-
 void ShowInfo()
 {
-    cout << "DART is a simple command line tool that imports directory art from a variety of source file types to D64 disk images.\n\n";
+    cout << "DART is a simple command-line tool that imports directory art from a variety of source file types to D64 disk images.\n\n";
     cout << "Usage:\n";
     cout << "------\n";
     cout << "dart input[+] [output.d64]\n\n";
     cout << "By default, DART will replace any existing old directory in the output file with the new, imported one. Entry types\n";
     cout << "will only be updated if the input file contains this information (D64, ASM). If none defined then DEL will be used.\n";
-    cout << "To append the imported DirArt to the existing directory entries without overwriting them, mark the input file with a\n";
-    cout << "plus sign (e.g., input.d64+, see example below). Thus, multiple DirArts can be imported in the same D64 as long as\n";
+    cout << "To append the imported DirArt to the existing directory entries without overwriting them, mark the input file with\n";
+    cout << "a plus sign (e.g., input.d64+, see example below). Thus, multiple DirArts can be imported in the same D64 as long as\n";
     cout << "there is space on track 18. DART does not support directories extending beyond track 18.\n\n";
-    cout << "DART doesn't import the directory's header and ID. The input file must only consist of the directory entries (with\n";
-    cout << "the exception of D64 files where the directory header and ID will be ignored).\n\n";
-    cout << "The [output.d64] parameter is optional. If not specified, DART will create an input_out.d64 file.\n\n";
+    cout << "The directory header and ID can only be imported from D64 and ASM files. All other input file types must only\n";
+    cout << "consist of directory entries, without a directory header and ID. In overwrite mode DART will always import the\n";
+    cout << "directory header and ID from D64 and ASM files, if these exist in the input file. In append mode, however, it will\n";
+    cout << "only import them if they are not defined in the output file.\n\n";
+    cout << "The [output.d64] parameter is optional. If not specified, DART will create an input_out.d64 file. The output file\n";
+    cout << "name can also be defined in KickAss ASM input files.\n\n";
     cout << "Accepted input file types:\n";
     cout << "--------------------------\n";
-    cout << "D64  - DART will import all directory entries from the input file to the output file.\n\n";
+    cout << "D64  - DART will import all directory entries from the input file. The file type, track and sector, and file size\n";
+    cout << "       will also be imported. In overwrite mode the directory header and ID will be imported if they are defined\n";
+    cout << "       in the input D64. In append mode they will only be imported if they are not defined in the output D64.\n\n";
     cout << "PRG  - DART accepts two file formats: screen RAM grabs (40-byte long char rows of which the first 16 are used as dir\n";
     cout << "       entries, can be more than 25 char rows long) and $a0 byte terminated directory entries*. If an $a0 byte is not\n";
     cout << "       detected sooner, then 16 bytes are imported per directory entry. DART then skips up to 24 bytes or until an\n";
@@ -1942,14 +2151,21 @@ void ShowInfo()
     cout << "           .byte $30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$01,$02,$03,$04,$05,$06,$a0\n\n";
     cout << "       *Char code $a0 (inverted space) is also used in standard directories to mark the end of entries.\n\n";
     cout << "BIN  - DART will treat this file type the same way as PRGs, without the first two header bytes.\n\n";
-    cout << "ASM  - KickAss ASM DirArt source file. Please refer to Chapter 11.6 in the Kick Assembler Reference Manual for\n";
-    cout << "       details. The ASM file must only contain the file parameters within [] brackets, without disk parameters.\n";
-    cout << "       DART only recognizes the name and type file parameters. Example:\n\n";
-    cout << "       [name = \"0123456789\", type = \"rel\"],\n";
-    cout << "       [name = @\"\\$75\\$69\\$75\\$69\\$B2\\$69\\$75\\$69\\$75\\$ae\\$B2\\$75\\$AE\\$20\\$20\\$20\", type=\"del\"]\n\n";
+    cout << "ASM  - KickAss ASM DirArt source file. Please refer to Chapter 11 in the Kick Assembler Reference Manual for details.\n";
+    cout << "       The ASM file may contain both disk and file parameters within [] brackets. DART recognizes the 'filename',\n";
+    cout << "       'name', and 'id' disk parameters and the 'name' and 'type' file parameters. If a 'filename' disk parameter is\n";
+    cout << "       provided, it will overwrite the [output.d64] command-line argument. In overwrite mode the directory header and\n";
+    cout << "       ID will be imported if they are defined in the input D64. In append mode they will only be imported if they\n";
+    cout << "       are not defined in the output D64.\n";
+    cout << "       Example:\n\n";
+    cout << "           .disk [filename= \"Test.d64\", name=\"test disk\", id=\"-omg-\"]\n";
+    cout << "           {\n";
+    cout << "               [name = \"0123456789ABCDEF\", type = \"prg\"],\n";
+    cout << "               [name = @\"\\$75\\$69\\$75\\$69\\$B2\\$69\\$75\\$69\\$75\\$ae\\$B2\\$75\\$AE\\$20\\$20\\$20\", type=\"del\"],\n";
+    cout << "           }\n\n";
     cout << "C    - Marq's PETSCII Editor C array file. This file type can also be produced using Petmate. This is essentially a\n";
     cout << "       C source file which consists of a single unsigned char array declaration initialized with the dir entries.\n";
-    cout << "       If present, DART will use the META: comment after the array to determine the dimensions of the DirArt.\n\n";
+    cout << "       If present, DART will use the 'META:' comment after the array to determine the dimensions of the DirArt.\n\n";
     cout << "PET  - This format is supported by Marq's PETSCII Editor and Petmate. DART will use the first two bytes of the input\n";
     cout << "       file to determine the dimensions of the DirArt, but it will ignore the next three bytes (border and background\n";
     cout << "       colors, charset) as well as color RAM data. DART will import max. 16 chars per directory entry.\n\n";
@@ -1958,18 +2174,19 @@ void ShowInfo()
     cout << "       DART will try to identify the colors by looking for a space character. If none found, it will use the darker\n";
     cout << "       of the two colors as background color. Image width must be exactly 16 characters (128 pixels or its multiples\n";
     cout << "       if the image is resized) and the height must be multiples of 8 pixels. Borders are not allowed. Image files\n";
-    cout << "       must display the uppercase charset and their appearance cannot rely on command characters.\n\n";
+    cout << "       must display the uppercase charset and their appearance cannot rely on command characters. DART uses the\n";
+    cout << "       LodePNG library by Lode Vandevenne to decode PNG files.\n\n";
     cout << "BMP  - Bitmap image file. Same rules and limitations as with PNGs.\n\n";
     cout << "Any other file type will be handled as a binary file and will be treated as PRGs without the first two header bytes.\n\n";
     cout << "Example 1:\n";
     cout << "----------\n\n";
     cout << "dart MyDirArt.d64\n\n";
     cout << "DART will create MyDirArt_out.d64 (if it doesn't already exist), and will import the whole directory of MyDirArt.d64\n";
-    cout << "in it overwriting any preexisting directory entries.\n\n";
+    cout << "in it overwriting any existing directory entries.\n\n";
     cout << "Example 2:\n";
     cout << "----------\n\n";
     cout << "dart MyDirArt.c MyDemo.d64\n\n";
-    cout << "DART will import the DirArt from a Marq's PETSCII Editor C array file in MyDemo.d64 overwriting any preexisting\n";
+    cout << "DART will import the DirArt from a Marq's PETSCII Editor C array file in MyDemo.d64 overwriting any existing\n";
     cout << "directory entries.\n\n";
     cout << "Example 3:\n";
     cout << "----------\n\n";
@@ -1989,7 +2206,7 @@ int main(int argc, char* argv[])
     {
 
     #ifdef DEBUG
-        InFileName = "test/Prg3.prg";
+        InFileName = "test/Asm3.asm";
 #else
 
         cout << "Usage: dart input[+] [output.d64]\n\n";
@@ -2078,24 +2295,8 @@ int main(int argc, char* argv[])
 
     CorrectFilePathSeparators();        //Replace "\" with "/" which is recognized by Windows as well
 
-    DiskSize = ReadBinaryFile(OutFileName, Disk);   //Load the output file if it exists
-
-    if (DiskSize < 0)
-    {
-        //Output file doesn't exits, create an empty D64
-        CreateDisk();
-    }
-    else if ((DiskSize != StdDiskSize) && (DiskSize != ExtDiskSize))    //Otherwise make sure the output disk is the correct size
-    {
-        cerr << "***CRITICAL***\t Invalid output disk file size!\n";
+    if (!OpenOutFile())
         return EXIT_FAILURE;
-    }
-
-    FixSparkleBAM();        //Earlier Sparkle versions didn't mark DirArt and internal directory sectors off in the BAM
-
-    DirTrack = 18;
-    DirSector = 1;
-    DirPos = 0;             //This will allow to start with the very first dir slot in overwrite mode
 
     if (AppendMode)
     {
@@ -2185,7 +2386,7 @@ int main(int argc, char* argv[])
 
     if (DirPos != 0)
     {
-        for (int i = DirPos; i < 256; i += 32)
+        for (int i = DirPos + 32; i < 256; i += 32)
         {
             NumFreeEntries++;
         }
