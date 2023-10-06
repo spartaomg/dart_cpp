@@ -1094,9 +1094,9 @@ bool ImportFromCArray() {
 
 bool AddAsmDirEntry(string AsmDirEntry)
 {
-    for (size_t i = 0; i < DirEntry.length(); i++)
+    for (size_t i = 0; i < AsmDirEntry.length(); i++)
     {
-        DirEntry[i] = tolower(DirEntry[i]);
+        AsmDirEntry[i] = tolower(AsmDirEntry[i]);
     }
 
     string EntrySegments[5];
