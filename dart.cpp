@@ -1476,12 +1476,24 @@ bool ImportFromAsm()
         }
     }
 
-    if (DirArt != "")
+    if ((DirArt != "") && (DirPos != 0))
     {
-        FindNextDirPos();
-        if (DirPos != 0)
+        DirEntry = DirArt;
+        string EntryType = DirEntry.substr(0, DirEntry.find("["));
+
+        for (size_t i = 0; i < EntryType.length(); i++)
         {
-            AddAsmDirEntry(DirArt);
+            EntryType[i] = tolower(EntryType[i]);
+        }
+
+        if (EntryType.find(".disk") != string::npos)
+        {
+            if (!AddAsmDiskParameters())
+                return false;
+        }
+        else
+        {
+            AddAsmDirEntry(DirEntry);
         }
     }
 
@@ -1492,7 +1504,7 @@ bool ImportFromAsm()
 //  IMPORT FROM PET
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
-bool ConvertPetToDirArt()
+bool ImportFromPet()
 {
     //Binary file With a .pet extension that includes the following information, without any padding:
     //- 1 byte: screen width in chars (40 for whole C64 screen)
@@ -2349,7 +2361,7 @@ int main(int argc, char* argv[])
     else if (DirArtType == "pet")
     {
         cout << "Importing DirArt from PET source...\n";
-        if (!ConvertPetToDirArt())          //Import from PET binary
+        if (!ImportFromPet())          //Import from PET binary
             return EXIT_FAILURE;
     }
     else if (DirArtType == "png")
