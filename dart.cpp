@@ -12,8 +12,15 @@ vector <unsigned char> Disk;
 vector <unsigned char> Image;   //pixels in RGBA format (4 bytes per pixel)
 vector <unsigned char> ImgRaw;
 
+//command line parameters
 string InFileName = "";
 string OutFileName = "";
+string argSkippedEntries = "";
+string argFileType = "DEL";
+
+int NumSkippedEntries = 0;      //We are overwriting the whole directory by default
+unsigned char FileType = 0x80;  //Default file type is DEL
+
 string DirEntry = "";
 string DirArt = "";
 string DirArtType = "";
@@ -316,7 +323,7 @@ void FindNextEmptyDirSector()
     if (Disk[Track[DirTrack] + (size_t)(18 * 4)] == 0)
     {
         DirSector = 0;
-        DirPos = 0;
+        DirPos = 0;     //This will indicate that the directory is full, no more entries are possible
         cout << "***INFO***\tDirectory is full.\n";
         return;
     }
@@ -389,10 +396,11 @@ void FindNextDirPos() {
                     DirTrack = NextT;
                     DirSector = NextS;
                     DirPos = 2;
-                    for (int i = 2; i < 256; i ++)
-                    {
-                        Disk[Track[DirTrack] + (DirSector * 256) + i] = 0;  //delete all file in dir sector
-                    }
+                    //BUG reported by Dr Science - we want to keep the existing T:S info 
+                    //for (int i = 2; i < 256; i ++)
+                    //{
+                    //    Disk[Track[DirTrack] + (DirSector * 256) + i] = 0;  //delete all file in dir sector
+                    //}
                 }
             }
             else
@@ -420,6 +428,11 @@ bool FindLastUsedDirPos()
 
     }
 
+    unsigned char SectorChain[18]{};
+    int ChainIndex = 0;
+
+    SectorChain[ChainIndex] = DirSector;
+
     //First find the last used directory sector
     while (Disk[Track[DirTrack] + (DirSector * 256) + 0] != 0)
     {
@@ -432,6 +445,7 @@ bool FindLastUsedDirPos()
             return false;
         }
 
+        SectorChain[++ChainIndex] = DirSector;
     }
 
     Disk[Track[DirTrack] + (DirSector * 256) + 0] = 0;
@@ -445,15 +459,23 @@ bool FindLastUsedDirPos()
         DirPos -= 32;
         if (DirPos < 0)
         {
-            DirPos = 0;
-            break;
+            if (ChainIndex > 0)
+            {
+                DirPos += 256;
+                DirSector = SectorChain[--ChainIndex];
+            }
+            else
+            {
+                DirPos = 0;
+                break;
+            }
         }
     }
     return true;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------------
-
+/*
 void DeleteOldDir()
 {
     //Free up unused dir sectors from old T:S chain in Overwrite Mode
@@ -479,7 +501,72 @@ void DeleteOldDir()
         MarkSectorAsFree(DirTrack, DirSector);
     }
 }
+*/
+//----------------------------------------------------------------------------------------------------------------------------------------------------
 
+bool ResetDirEntries()
+{
+    DirTrack = 18;
+    DirSector = 1;
+    DirPos = 0;
+
+    int n = 0;
+
+    while (n < NumSkippedEntries)
+    {
+        FindNextDirPos();
+        if (DirPos == 0)
+        {
+            cerr << "***CRITICAL***\tUnable to skip " << NumSkippedEntries << "entries!\n";
+            return false;
+        }
+
+        if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos] != 0)
+        {
+            n++;
+        }
+        else
+        {
+            NumSkippedEntries = n;  //we have reached the end of the directory, this is th next empty directory slot
+            cout << "***INFO***\tSkipping the whole existing directory. Switching to Append Mode.\n";
+            AppendMode = true;
+            return true;
+        }
+    }
+
+    //Here DirPos should point at the first dir entry that we will overwrite
+
+    int i = (DirPos != 0) ? DirPos : 2;
+    size_t DT = DirTrack;
+    size_t DS = DirSector;
+
+    while (i != 0)
+    {
+        i += 32;
+
+        if (i > 256)
+        {
+            if (Disk[Track[DT] + (DS * 256) + 0] != 0)
+            {
+                DT = Disk[Track[DT] + (DS * 256) + 0];
+                DS = Disk[Track[DT] + (DS * 256) + 1];
+                i = 2;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        Disk[Track[DT] + (DS * 256) + i] = 0;          //Delete file type indicator
+        for (int j = i + 3; j < i + 30; j++)
+        {
+            Disk[Track[DT] + (DS * 256) + j] = 0;      //Delete dir entry's name and block size, skipping T:S pointer
+        }
+    }
+
+    return true;
+}
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
 void CreateDisk()
@@ -726,9 +813,12 @@ void AddTxtDirEntry(string TxtDirEntry) {
     //Define file type and T:S if not yet denifed
     if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] == 0)
     {
-        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = 0x80;      //"DEL"
-        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;        //Track 18
-        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;         //Sector 0
+        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = FileType;      //"DEL"
+    }
+    if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] == 0)            //Update T:S pointer only if it doesn't exits
+    {
+        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
+        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
     }
 
     //Remove vbNewLine characters and add 16 SHIFT+SPACE tail characters
@@ -825,9 +915,12 @@ bool ImportFromBinary() {
                     //Define file type and T:S if not yet denifed
                     if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] == 0)
                     {
-                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = 0x80;      //"DEL"
-                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;        //Track 18
-                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;         //Sector 0
+                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = FileType;      //"DEL"
+                    }
+                    if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] == 0)            //Update T:S pointer only if it doesn't exits
+                    {
+                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
+                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
                     }
 
                     for (size_t i = 0; i < 16; i++)                 //Fill dir entry with 0xa0 chars first
@@ -970,9 +1063,12 @@ bool AddCArrayDirEntry(int RowLen)
                 //Define file type and T:S if not yet denifed
                 if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] == 0)
                 {
-                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = 0x80;      //"DEL"
-                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;        //Track 18
-                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;         //Sector 0
+                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = FileType;      //"DEL"
+                }
+                if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] == 0)            //Update T:S pointer only if it doesn't exits
+                {
+                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
+                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
                 }
 
                 for (size_t i = 0; i < 16; i++)
@@ -1125,7 +1221,7 @@ bool AddAsmDirEntry(string AsmDirEntry)
     {
         if ((EntrySegments[0].find("[") != string::npos) && (EntrySegments[0].find("name") != string::npos) && (EntrySegments[0].find("=") != string::npos))
         {
-            unsigned char FileType = 0x80;  //DEL default file type
+            //FileType = 0x80;  //DEL default file type
 
             if (NumSegments > 3)
             {
@@ -1193,7 +1289,7 @@ bool AddAsmDirEntry(string AsmDirEntry)
 
                 Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = FileType;          //Always overwrite FileType
 
-                if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] == 0)            //Only update T:S of entry if none exits
+                if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] == 0)            //Update T:S pointer only if it doesn't exit
                 {
                     Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
                     Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
@@ -1539,9 +1635,12 @@ bool ImportFromPet()
             //Define file type and T:S if not yet denifed
             if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] == 0)
             {
-                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = 0x80;      //"DEL"
-                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;        //Track 18
-                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;         //Sector 0
+                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = FileType;      //"DEL"
+            }
+            if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] == 0)            //Update T:S pointer only if it doesn't exits
+            {
+                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
+                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
             }
 
             for (size_t i = 0; i < 16; i++)
@@ -1667,9 +1766,12 @@ bool ImportFromJson()
                 //Define file type and T:S if not yet denifed
                 if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] == 0)
                 {
-                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = 0x80;  //"DEL"
-                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;    //Track 18
-                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;     //Sector 0
+                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = FileType;      //"DEL"
+                }
+                if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] == 0)            //Update T:S pointer only if it doesn't exits
+                {
+                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
+                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
                 }
 
                 for (int i = 0; i < 16; i++)
@@ -2081,9 +2183,12 @@ bool ImportFromImage()
         {
             if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] == 0)
             {
-                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = 0x80;  //"DEL"
-                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;    //Track 18
-                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;     //Sector 0
+                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = FileType;      //"DEL"
+            }
+            if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] == 0)            //Update T:S pointer only if it doesn't exits
+            {
+                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
+                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
             }
 
             for (int i = 0; i < 16; i++)
@@ -2134,35 +2239,63 @@ void CreateTrackTable()
 void ShowInfo()
 {
     cout << "DART is a simple command-line tool that imports directory art from a variety of source file types to D64 disk images.\n\n";
+
     cout << "Usage:\n";
     cout << "------\n";
-    cout << "dart input[+] [output.d64]\n\n";
-    cout << "By default, DART will replace any existing old directory in the output file with the new, imported one. Entry types\n";
-    cout << "will only be updated if the input file contains this information (D64, ASM). If none defined then DEL will be used.\n";
-    cout << "To append the imported DirArt to the existing directory entries without overwriting them, mark the input file with\n";
-    cout << "a plus sign (e.g., input.d64+, see example below). Thus, multiple DirArts can be imported in the same D64 as long as\n";
-    cout << "there is space on track 18. DART does not support directories extending beyond track 18.\n\n";
+    cout << "dart input [output.d64] [skipped entries] [default entry type]\n\n";
+
+    cout << "input - the file from which the directory art will be imported. See accepted file types below.\n\n";
+
+    cout << "[output.d64] - the D64 file to which the directory art will be imported. This parameter is optional. If not entered,\n";
+    cout << "       DART will create an input_out.d64 file. The output file name can also be defined in KickAss ASM input files.\n\n";
+
+    cout << "[skipped entries] - the number of entries in the direcotry of the output.d64 that will be skipped. E.g. use 1 if\n";
+    cout << "       you want to leave the first entry untouched. To append the directory art to the end of the existing directory,\n";
+    cout << "       use + instead of a numeric value. This parameter is optional. If not specified, the default value is 0\n";
+    cout << "       and DART will overwrite all existing directory entries.\n\n";
+
+    cout << "[default file type] - DART will use the file type specified here for each directory art entry, if not otherwise\n";
+    cout << "       defined in the input file. Accepted values include: del, prg, usr, seq, *del, del<, etc. This parameter is\n";
+    cout << "       optional. If not specified, DART will use del as default entry type.\n\n";
+
+    cout << "The [output.d64], [skipped entries], and [default entry type] parameters are optional and they all depend on the\n";
+    cout << "parameter on their left side. This means that the second command line argument is always interpreted as output.d64.\n";
+    cout << "If you want to omit it then you will also need to omit the other two optional parameters. Conversely, if you want to\n";
+    cout << "create PRG directory art entries then first you will also need to provide an output.d64 and the number of entries\n";
+    cout << "to be skipped at the beginning of the directory before the directory art will be added to it.\n\n";
+
+    cout << "You can only import from one input file at a time. DART will replace all existing directory entries in the output\n";
+    cout << "file (after skipping the number of entries defined in [skipped entries]) with the new, imported ones. To append the\n";
+    cout << "imported DirArt to the existing directory entries, use + as [skipped entries]. This way, multiple DirArts can be\n";
+    cout << "imported in the same D64 as long as there is space on track 18. DART does not support directories expanding beyond\n";
+    cout << "track 18. The new entries' type is determined by the [default entry type] parameter or can be defined separately\n";
+    cout << "in D64 and ASM input files.\n\n";
+
     cout << "The directory header and ID can only be imported from D64 and ASM files. All other input file types must only\n";
     cout << "consist of directory entries, without a directory header and ID. In overwrite mode DART will always import the\n";
     cout << "directory header and ID from D64 and ASM files, if these exist in the input file. In append mode, however, it will\n";
     cout << "only import them if they are not defined in the output file.\n\n";
-    cout << "The [output.d64] parameter is optional. If not specified, DART will create an input_out.d64 file. The output file\n";
-    cout << "name can also be defined in KickAss ASM input files.\n\n";
+
     cout << "Accepted input file types:\n";
     cout << "--------------------------\n";
     cout << "D64  - DART will import all directory entries from the input file. The file type, track and sector, and file size\n";
     cout << "       will also be imported. In overwrite mode the directory header and ID will be imported if they are defined\n";
     cout << "       in the input D64. In append mode they will only be imported if they are not defined in the output D64.\n\n";
+
     cout << "PRG  - DART accepts two file formats: screen RAM grabs (40-byte long char rows of which the first 16 are used as dir\n";
     cout << "       entries, can be more than 25 char rows long) and $a0 byte terminated directory entries*. If an $a0 byte is not\n";
     cout << "       detected sooner, then 16 bytes are imported per directory entry. DART then skips up to 24 bytes or until an\n";
     cout << "       $a0 byte detected. Example source code for $a0-terminated .PRG (KickAss format, must be compiled):\n\n";
+
     cout << "           * = $1000              // Address can be anything, will be skipped by DART\n";
     cout << "           .text \"hello world!\"   // This will be upper case once compiled\n";
     cout << "           .byte $a0              // Terminates directory entry\n";
     cout << "           .byte $30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$01,$02,$03,$04,$05,$06,$a0\n\n";
+
     cout << "       *Char code $a0 (inverted space) is also used in standard directories to mark the end of entries.\n\n";
+
     cout << "BIN  - DART will treat this file type the same way as PRGs, without the first two header bytes.\n\n";
+
     cout << "ASM  - KickAss ASM DirArt source file. Please refer to Chapter 11 in the Kick Assembler Reference Manual for details.\n";
     cout << "       The ASM file may contain both disk and file parameters within [] brackets. DART recognizes the 'filename',\n";
     cout << "       'name', and 'id' disk parameters and the 'name' and 'type' file parameters. If a 'filename' disk parameter is\n";
@@ -2170,47 +2303,73 @@ void ShowInfo()
     cout << "       ID will be imported if they are defined in the input D64. In append mode they will only be imported if they\n";
     cout << "       are not defined in the output D64.\n";
     cout << "       Example:\n\n";
+
     cout << "           .disk [filename= \"Test.d64\", name=\"test disk\", id=\"-omg-\"]\n";
     cout << "           {\n";
     cout << "               [name = \"0123456789ABCDEF\", type = \"prg\"],\n";
     cout << "               [name = @\"\\$75\\$69\\$75\\$69\\$B2\\$69\\$75\\$69\\$75\\$ae\\$B2\\$75\\$AE\\$20\\$20\\$20\", type=\"del\"],\n";
     cout << "           }\n\n";
+
     cout << "C    - Marq's PETSCII Editor C array file. This file type can also be produced using Petmate. This is essentially a\n";
     cout << "       C source file which consists of a single unsigned char array declaration initialized with the dir entries.\n";
     cout << "       If present, DART will use the 'META:' comment after the array to determine the dimensions of the DirArt.\n\n";
     cout << "PET  - This format is supported by Marq's PETSCII Editor and Petmate. DART will use the first two bytes of the input\n";
     cout << "       file to determine the dimensions of the DirArt, but it will ignore the next three bytes (border and background\n";
     cout << "       colors, charset) as well as color RAM data. DART will import max. 16 chars per directory entry.\n\n";
+
     cout << "JSON - This format can be created using Petmate. DART will import max. 16 chars from each character row.\n\n";
+
     cout << "PNG  - Portable Network Graphics image file. Image input files can only use two colors (background and foreground).\n";
     cout << "       DART will try to identify the colors by looking for a space character. If none found, it will use the darker\n";
     cout << "       of the two colors as background color. Image width must be exactly 16 characters (128 pixels or its multiples\n";
     cout << "       if the image is resized) and the height must be multiples of 8 pixels. Borders are not allowed. Image files\n";
     cout << "       must display the uppercase charset and their appearance cannot rely on command characters. DART uses the\n";
     cout << "       LodePNG library by Lode Vandevenne to decode PNG files.\n\n";
+
     cout << "BMP  - Bitmap image file. Same rules and limitations as with PNGs.\n\n";
+
     cout << "Any other file type will be handled as a binary file and will be treated as PRGs without the first two header bytes.\n\n";
+
     cout << "Example 1:\n";
     cout << "----------\n\n";
-    cout << "dart MyDirArt.d64\n\n";
+
+    cout << "dart MyDirArt.png\n\n";
+
     cout << "DART will create MyDirArt_out.d64 (if it doesn't already exist), and will import the whole directory of MyDirArt.d64\n";
-    cout << "in it overwriting any existing directory entries.\n\n";
+    cout << "into it overwriting any existing directory entries, using del as entry type.\n\n";
+
     cout << "Example 2:\n";
     cout << "----------\n\n";
+
     cout << "dart MyDirArt.c MyDemo.d64\n\n";
-    cout << "DART will import the DirArt from a Marq's PETSCII Editor C array file in MyDemo.d64 overwriting any existing\n";
+
+    cout << "DART will import the DirArt from a Marq's PETSCII Editor C array file into MyDemo.d64 overwriting all existing\n";
     cout << "directory entries.\n\n";
+
     cout << "Example 3:\n";
     cout << "----------\n\n";
-    cout << "dart MyDirArt.asm+ MyDemo.d64\n\n";
-    cout << "DART will append the DirArt from a KickAss ASM source file to the existing directory entries of MyDemo.d64.\n";
+
+    cout << "dart MyDirArt.asm MyDemo.d64 +\n\n";
+
+    cout << "DART will append the DirArt from a KickAss ASM source file to the existing directory entries of MyDemo.d64.\n\n";
+
+    cout << "Example 4:\n";
+    cout << "----------\n\n";
+
+    cout << "dart MyDirArt1.png MyDemo.d64 1 del\n";
+    cout << "dart MyDirArt2.png MyDemo.d64 + del\n\n";
+
+    cout << "DART will first import the DirArt from a PNG image file into MyDemo.d64 overwriting all directory entries except\n";
+    cout << "the first one. Then DART will append the DirArt from the second PNG file to the directory of MyDemo.d64.\n";
 }
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
 
 int main(int argc, char* argv[])
 {
     cout << "\n";
     cout << "*********************************************************\n";
-    cout << "DART 1.2 - Directory Art Importer by Sparta (C) 2022-2023\n";
+    cout << "DART 1.3 - Directory Art Importer by Sparta (C) 2022-2023\n";
     cout << "*********************************************************\n";
     cout << "\n";
 
@@ -2218,24 +2377,38 @@ int main(int argc, char* argv[])
     {
 
     #ifdef DEBUG
-        InFileName = "test/Asm3.asm";
+        InFileName = "c:/Users/Tamas/OneDrive/C64/Coding/Atlantis/Aullido/art2.c";
+        OutFileName = "c:/Users/Tamas/OneDrive/C64/Coding/Atlantis/Aullido/test.d64";
+        argSkippedEntries = "+";
+        argFileType = "del";
 #else
 
-        cout << "Usage: dart input[+] [output.d64]\n\n";
+        cout << "Usage: dart input [output.d64] [skipped entries] [default entry type]\n\n";
         cout << "Help:  dart -?\n";
         return EXIT_SUCCESS;
 
     #endif
 
     }
-    else if (argc == 2)
+    
+    if (argc > 1)
     {
         InFileName = argv[1];
     }
-    else
+    
+    if (argc > 2)
     {
-        InFileName = argv[1];
         OutFileName = argv[2];
+    }
+
+    if (argc > 3)
+    {
+        argSkippedEntries = argv[3];
+    }
+    
+    if (argc == 5)
+    {
+        argFileType = argv[4];
     }
 
     if (InFileName == "")
@@ -2250,10 +2423,84 @@ int main(int argc, char* argv[])
         return EXIT_SUCCESS;
     }
 
-    if (InFileName.at(InFileName.size() - 1) == '+')
+    if (argSkippedEntries == "+")
     {
         AppendMode = true;
-        InFileName = InFileName.substr(0, InFileName.size() - 1);
+    }
+    else if (argSkippedEntries != "")
+    {
+        if (IsNumeric(argSkippedEntries))
+        {
+            NumSkippedEntries = ConvertStringToInt(argSkippedEntries);
+        }
+        else
+        {
+            cerr << "***CRITICAL***\tUnrecognized [skipped entries] argument!\n";
+            return EXIT_FAILURE;
+        }
+    }
+
+    for (size_t i = 0; i < argFileType.length(); i++)
+    {
+        argFileType[i] = toupper(argFileType[i]);
+    }
+    
+    if (argFileType == "*SEQ")
+    {
+        FileType = 0x01;
+    }
+    else if (argFileType == "*PRG")
+    {
+        FileType = 0x02;
+    }
+    else if (argFileType == "*USR")
+    {
+        FileType = 0x03;
+    }
+    else if (argFileType == "DEL<")
+    {
+        FileType = 0xc0;
+    }
+    else if (argFileType == "SEQ<")
+    {
+        FileType = 0xc1;
+    }
+    else if (argFileType == "PRG<")
+    {
+        FileType = 0xc2;
+    }
+    else if (argFileType == "USR<")
+    {
+        FileType = 0xc3;
+    }
+    else if (argFileType == "REL<")
+    {
+        FileType = 0xc4;
+    }
+    else if (argFileType == "DEL")
+    {
+        FileType = 0x80;
+    }
+    else if (argFileType == "SEQ")
+    {
+        FileType = 0x81;
+    }
+    else if (argFileType == "PRG")
+    {
+        FileType = 0x82;
+    }
+    else if (argFileType == "USR")
+    {
+        FileType = 0x83;
+    }
+    else if (argFileType == "REL")
+    {
+        FileType = 0x84;
+    }
+    else
+    {
+        cerr << "***CRITICAL*** unrecognized default file type parameter!\n";
+        return EXIT_FAILURE;
     }
 
     if (!fs::exists(InFileName))
@@ -2263,24 +2510,14 @@ int main(int argc, char* argv[])
     }
 
     CreateTrackTable();
-    
+
+    CorrectFilePathSeparators();        //Replace "\" with "/" which is recognized by Windows as well
+
     //Find the input file's extension
     int ExtStart = InFileName.length();
 
     for (int i = InFileName.length() - 1; i >= 0; i--)
     {
-#if _WIN32
-        if ((InFileName[i] == '\\') || (InFileName[i] == '/'))
-        {
-            //We've reached a path separator before a "." -> no extension
-            break;
-        }
-        else if (InFileName[i] == '.')
-        {
-            ExtStart = i + 1;
-            break;
-        }
-#elif __APPLE__ || __linux__
         if (InFileName[i] == '/')
         {
             //We've reached a path separator before a "." -> no extension
@@ -2291,7 +2528,6 @@ int main(int argc, char* argv[])
             ExtStart = i + 1;
             break;
         }
-#endif
     }
 
     for (size_t i = ExtStart; i < InFileName.length(); i++)
@@ -2304,8 +2540,6 @@ int main(int argc, char* argv[])
         //Output file name not provided, use input file name without its extension to create output d64 file name
         OutFileName = InFileName.substr(0, InFileName.size() - DirArtType.size() - 1) + "_out.d64";
     }
-
-    CorrectFilePathSeparators();        //Replace "\" with "/" which is recognized by Windows as well
 
     if (!OpenOutFile())
         return EXIT_FAILURE;
@@ -2320,7 +2554,16 @@ int main(int argc, char* argv[])
     else
     {
         cout << "Import mode: Overwrite\n";
+        if (NumSkippedEntries > 0)
+        {
+            cout << "Skipping " << NumSkippedEntries << " directory " << ((NumSkippedEntries == 1) ? "entry\n" : "entries\n");
+        }
+
+        if (!ResetDirEntries())
+            return EXIT_FAILURE;
     }
+
+    cout << "Default directory art file type: " << argFileType << "\n";
 
     if (DirArtType == "d64")
     {
@@ -2361,7 +2604,7 @@ int main(int argc, char* argv[])
     else if (DirArtType == "pet")
     {
         cout << "Importing DirArt from PET source...\n";
-        if (!ImportFromPet())          //Import from PET binary
+        if (!ImportFromPet())               //Import from PET binary
             return EXIT_FAILURE;
     }
     else if (DirArtType == "png")
@@ -2381,11 +2624,6 @@ int main(int argc, char* argv[])
         cout << "Importing DirArt from binary file...\n";
         if (!ImportFromBinary())            //Import from any other file, first 16 bytes of each 40 or until 0xa0 character found
             return EXIT_FAILURE;
-    }
-    
-    if (!AppendMode)
-    {
-        DeleteOldDir();                     //Free up unused dir sectors from old T:S chain in Overwrite Mode
     }
 
     if (!WriteDiskImage(OutFileName))
