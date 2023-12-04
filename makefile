@@ -1,25 +1,39 @@
-#define macros
-DIR_OBJ = obj/release
-DIR_BIN = bin/release
+
+#---------------------------------------------------
+# This makefile requires GNU make, mkdir, and g++.
+# On Windows please use MinGW.
+#---------------------------------------------------
+
+ifeq ($(OS),Windows_NT)
+	DIR_OBJ = obj/windows
+	DIR_BIN = bin/windows
+	EXEC = $(DIR_BIN)/DART.exe
+	LINKFLAGS = -static -static-libgcc -static-libstdc++ -s -std=c++17 -o
+else
+	UNAME = $(shell uname)
+	ifeq ($(UNAME),Linux)
+		DIR_OBJ = obj/linux
+		DIR_BIN = bin/linux
+		LINKFLAGS = -static -static-libgcc -static-libstdc++ -s -std=c++17 -o
+	endif
+	ifeq ($(UNAME),Darwin)
+		DIR_OBJ = obj/macos
+		DIR_BIN = bin/macos
+		LINKFLAGS = -std=c++17 -o
+	endif
+	EXEC = $(DIR_BIN)/dart
+endif
+
+# "mkdir" (with quotes) will force Windows to search for the executable (GNU) mkdir instead of the CMD command.
+# Just make sure that its folder is in the system PATH. It also works on Linux and macOS.
+create_dir = @"mkdir" -p $(@D)
+
 CFLAGS = -O3 -Wall -std=c++17 -fexceptions -c #-m32
 RESFLAGS = -J rc -O coff -i
-create_dir = @mkdir -p $(@D)
 OBJ = $(DIR_OBJ)/ascii2dirart.o $(DIR_OBJ)/charsettab.o $(DIR_OBJ)/dart.o $(DIR_OBJ)/petscii2dirart.o $(DIR_OBJ)/pixelcnttab.o $(DIR_OBJ)/thirdparty/lodepng.o
 
 ifeq ($(OS),Windows_NT)
 	OBJ += $(DIR_OBJ)/dart.res
-	EXEC = $(DIR_BIN)/dart.exe
-	LINKFLAGS = -static -static-libgcc -static-libstdc++ -s -std=c++17 -o
-else
-	EXEC = $(DIR_BIN)/dart
-
-	UNAME = $(shell uname)
-    ifeq ($(UNAME),Linux)
-		LINKFLAGS = -static -static-libgcc -static-libstdc++ -s -std=c++17 -o #-m32
-    endif
-    ifeq ($(UNAME),Darwin)
-		LINKFLAGS = -std=c++17 -o
-    endif
 endif
 
 $(EXEC): $(OBJ)
