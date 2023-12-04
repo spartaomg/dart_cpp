@@ -16,10 +16,16 @@ vector <unsigned char> ImgRaw;
 string InFileName = "";
 string OutFileName = "";
 string argSkippedEntries = "";
-string argFileType = "DEL";
+string argEntryType = "DEL";
+string argFirstImportedEntry = "";
+string argLastImportedEntry = "";
 
-int NumSkippedEntries = 0;      //We are overwriting the whole directory by default
 unsigned char FileType = 0x80;  //Default file type is DEL
+int NumSkippedEntries = 0;      //We are overwriting the whole directory by default
+int FirstImportedEntry = 1;     //We start import with the first entry by default
+int LastImportedEntry = 0xffff; //We import the whole directory art by default
+
+int EntryIndex = 0;             //Index of current entry, will be compared to FirstImportedentry and LastImportedEntry
 
 string DirEntry = "";
 string DirArt = "";
@@ -758,18 +764,23 @@ bool ImportFromD64()
         {
             if (DA[DAPtr + b] != 0)
             {
-                FindNextDirPos();
+                EntryIndex++;
 
-                if (DirPos != 0)
+                if ((EntryIndex >= FirstImportedEntry) && (EntryIndex <= LastImportedEntry))
                 {
-                    for (int i = 0; i < 30; i++)     //Include file type and T:S, as well as file size
+                    FindNextDirPos();
+
+                    if (DirPos != 0)
                     {
-                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + i] = DA[DAPtr + b + i];
+                        for (int i = 0; i < 30; i++)     //Include file type and T:S, as well as file size
+                        {
+                            Disk[Track[DirTrack] + (DirSector * 256) + DirPos + i] = DA[DAPtr + b + i];
+                        }
                     }
-                }
-                else
-                {
-                    return true;
+                    else
+                    {
+                        return true;
+                    }
                 }
             }
         }
@@ -867,10 +878,16 @@ bool ImportFromTxt()
 
     if (DirArt != "")
     {
-        FindNextDirPos();
-        if (DirPos != 0)
+        EntryIndex++;
+
+        if ((EntryIndex >= FirstImportedEntry) && (EntryIndex <= LastImportedEntry))
         {
-            AddTxtDirEntry(DirArt);
+            FindNextDirPos();
+
+            if (DirPos != 0)
+            {
+                AddTxtDirEntry(DirArt);
+            }
         }
     }
 
@@ -902,12 +919,10 @@ bool ImportFromBinary() {
     {
         if (((DAPtr == DA.size()) && (DAPtr != EntryStart)) || (DAPtr == EntryStart + 16) || (DAPtr < DA.size() && (DA[DAPtr] == 0xa0)))
         {
-            //if ((DAPtr == EntryStart) && (DAPtr == DA.size()))   //BUG FIX - accept empty lines, i.e. treat each 0xa0 chars as line ends
-            //{
-            //    break;
-            //}
-            //else
-            //{
+            EntryIndex++;
+
+            if ((EntryIndex >= FirstImportedEntry) && (EntryIndex <= LastImportedEntry))
+            {
                 FindNextDirPos();
 
                 if (DirPos != 0)
@@ -938,12 +953,13 @@ bool ImportFromBinary() {
                 {
                     return true;
                 }
+            }
 
-                while ((DAPtr < DA.size()) && (DAPtr < EntryStart + 39) && (DA[DAPtr] != 0xa0))
-                {
-                    DAPtr++;        //Find last char of screen row (start+39) or first $a0-byte if sooner
-                }
-            //}
+            while ((DAPtr < DA.size()) && (DAPtr < EntryStart + 39) && (DA[DAPtr] != 0xa0))
+            {
+                DAPtr++;        //Find last char of screen row (start+39) or first $a0-byte if sooner
+            }
+
             EntryStart = DAPtr + 1; //Start of next line
         }
         DAPtr++;
@@ -1055,33 +1071,37 @@ bool AddCArrayDirEntry(int RowLen)
 
         if (AllNumeric)
         {
+            EntryIndex++;
 
-            FindNextDirPos();
-
-            if (DirPos != 0)
+            if ((EntryIndex >= FirstImportedEntry) && (EntryIndex <= LastImportedEntry))
             {
-                //Define file type and T:S if not yet denifed
-                if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] == 0)
-                {
-                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = FileType;      //"DEL"
-                }
-                if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] == 0)            //Update T:S pointer only if it doesn't exits
-                {
-                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
-                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
-                }
+                FindNextDirPos();
 
-                for (size_t i = 0; i < 16; i++)
+                if (DirPos != 0)
                 {
-                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = Petscii2DirArt[bEntry[i]];
+                    //Define file type and T:S if not yet denifed
+                    if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] == 0)
+                    {
+                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = FileType;      //"DEL"
+                    }
+                    if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] == 0)            //Update T:S pointer only if it doesn't exits
+                    {
+                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
+                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
+                    }
+
+                    for (size_t i = 0; i < 16; i++)
+                    {
+                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = Petscii2DirArt[bEntry[i]];
+                    }
+
+                    DirEntryAdded = true;
+
                 }
-
-                DirEntryAdded = true;
-
-            }
-            else
-            {
-                return true;
+                else
+                {
+                    return true;
+                }
             }
         }
     }
@@ -1282,105 +1302,110 @@ bool AddAsmDirEntry(string AsmDirEntry)
                 }
             }
 
-            FindNextDirPos();
-            
-            if (DirPos != 0)
+            EntryIndex++;
+
+            if ((EntryIndex >= FirstImportedEntry) && (EntryIndex <= LastImportedEntry))
             {
+                FindNextDirPos();
 
-                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = FileType;          //Always overwrite FileType
-
-                if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] == 0)            //Update T:S pointer only if it doesn't exit
+                if (DirPos != 0)
                 {
-                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
-                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
-                }
 
-                if (EntrySegments[0].find("@") != string::npos)
-                {
-                    //Numeric entry
-                    unsigned char Entry[16];
-                    string Values[16];
+                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = FileType;          //Always overwrite FileType
 
-                    //Fill array with 16 SHIFT+SPACE characters
-                    fill_n(Entry, 16, 0xa0);
-                    fill_n(Values, 16, "");
-
-                    int NumValues = 0;
-                    delimiter = "\\";
-                    while ((EntrySegments[1].find(delimiter) != string::npos) && (NumValues < 15))
+                    if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] == 0)            //Update T:S pointer only if it doesn't exit
                     {
-                        string ThisValue = EntrySegments[1].substr(0, EntrySegments[1].find(delimiter));
-                        if (ThisValue != "")
-                        {
-                            Values[NumValues++] = ThisValue;
-                        }
-                        EntrySegments[1].erase(0, EntrySegments[1].find(delimiter) + delimiter.length());
+                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
+                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
                     }
-                    Values[NumValues++] = EntrySegments[1];
 
-                    int Idx = 0;
-
-                    for (int v = 0; v < NumValues; v++)
+                    if (EntrySegments[0].find("@") != string::npos)
                     {
-                        if (Values[v] != "")
+                        //Numeric entry
+                        unsigned char Entry[16];
+                        string Values[16];
+
+                        //Fill array with 16 SHIFT+SPACE characters
+                        fill_n(Entry, 16, 0xa0);
+                        fill_n(Values, 16, "");
+
+                        int NumValues = 0;
+                        delimiter = "\\";
+                        while ((EntrySegments[1].find(delimiter) != string::npos) && (NumValues < 15))
                         {
-                            unsigned char NextChar = 0x20;          //SPACE default char - if conversion is not possible
-                            if (Values[v].find("$") == 0)
+                            string ThisValue = EntrySegments[1].substr(0, EntrySegments[1].find(delimiter));
+                            if (ThisValue != "")
                             {
-                                //Hex Entry
-                                Values[v].erase(0, 1);
-                                if (IsHexString(Values[v]))
+                                Values[NumValues++] = ThisValue;
+                            }
+                            EntrySegments[1].erase(0, EntrySegments[1].find(delimiter) + delimiter.length());
+                        }
+                        Values[NumValues++] = EntrySegments[1];
+
+                        int Idx = 0;
+
+                        for (int v = 0; v < NumValues; v++)
+                        {
+                            if (Values[v] != "")
+                            {
+                                unsigned char NextChar = 0x20;          //SPACE default char - if conversion is not possible
+                                if (Values[v].find("$") == 0)
                                 {
-                                    NextChar = ConvertHexStringToInt(Values[v]);
+                                    //Hex Entry
+                                    Values[v].erase(0, 1);
+                                    if (IsHexString(Values[v]))
+                                    {
+                                        NextChar = ConvertHexStringToInt(Values[v]);
+                                    }
+                                    else
+                                    {
+                                        break;
+                                    }
                                 }
                                 else
+                                {
+                                    //Decimal Entry
+                                    if (IsNumeric(Values[v]))
+                                    {
+                                        NextChar = ConvertStringToInt(Values[v]);
+                                    }
+                                    else
+                                    {
+                                        break;
+                                    }
+                                }
+                                Entry[Idx++] = NextChar;
+                                if (Idx == 16)
                                 {
                                     break;
                                 }
                             }
-                            else
-                            {
-                                //Decimal Entry
-                                if (IsNumeric(Values[v]))
-                                {
-                                    NextChar = ConvertStringToInt(Values[v]);
-                                }
-                                else
-                                {
-                                    break;
-                                }
-                            }
-                            Entry[Idx++] = NextChar;
-                            if (Idx == 16)
-                            {
-                                break;
-                            }
+                        }
+                        for (size_t i = 0; i < 16; i++)
+                        {
+                            Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = Entry[i];
                         }
                     }
-                    for (size_t i = 0; i < 16; i++)
+                    else
                     {
-                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = Entry[i];
+                        //Text Entry, pad it with inverted space
+                        //Fill the slot first with $A0
+                        for (size_t i = 0; i < 16; i++)
+                        {
+                            Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = 0xa0;
+                        }
+                        string ThisEntry = EntrySegments[1];
+                        for (size_t i = 0; (i < ThisEntry.length()) && (i < 16); i++)
+                        {
+                            unsigned char NextChar = toupper(ThisEntry[i]);
+                            Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = Ascii2DirArt[NextChar];
+                        }
                     }
                 }
                 else
                 {
-                    //Text Entry, pad it with inverted space
-                    //Fill the slot first with $A0
-                    for (size_t i = 0; i < 16; i++)
-                    {
-                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = 0xa0;
-                    }
-                    string ThisEntry = EntrySegments[1];
-                    for (size_t i = 0; (i < ThisEntry.length()) && (i < 16); i++)
-                    {
-                        unsigned char NextChar = toupper(ThisEntry[i]);
-                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = Ascii2DirArt[NextChar];
-                    }
+                    return false;
                 }
-            }
-            else
-            {
-                return false;
             }
         }
     }
@@ -1629,33 +1654,39 @@ bool ImportFromPet()
 
     for (size_t rc = 0; rc < RowCnt; rc++)
     {
-        FindNextDirPos();
-        if (DirPos != 0)
-        {
-            //Define file type and T:S if not yet denifed
-            if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] == 0)
-            {
-                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = FileType;      //"DEL"
-            }
-            if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] == 0)            //Update T:S pointer only if it doesn't exits
-            {
-                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
-                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
-            }
+        EntryIndex++;
 
-            for (size_t i = 0; i < 16; i++)
-            {
-                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = 0xa0;
-            }
-
-            for (size_t i = 0; (i < RowLen) && (i < 16); i++)
-            {
-                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = Petscii2DirArt[PetFile[5 + (rc * RowLen) + i]];
-            }
-        }
-        else
+        if ((EntryIndex >= FirstImportedEntry) && (EntryIndex <= LastImportedEntry))
         {
-            return true;
+            FindNextDirPos();
+
+            if (DirPos != 0)
+            {
+                //Define file type and T:S if not yet denifed
+                if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] == 0)
+                {
+                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = FileType;      //"DEL"
+                }
+                if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] == 0)            //Update T:S pointer only if it doesn't exits
+                {
+                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
+                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
+                }
+
+                for (size_t i = 0; i < 16; i++)
+                {
+                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = 0xa0;
+                }
+
+                for (size_t i = 0; (i < RowLen) && (i < 16); i++)
+                {
+                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = Petscii2DirArt[PetFile[5 + (rc * RowLen) + i]];
+                }
+            }
+            else
+            {
+                return true;
+            }
         }
     }
 
@@ -1759,34 +1790,39 @@ bool ImportFromJson()
     
         for (int rc = 0; rc < RowCnt; rc++)
         {
-            FindNextDirPos();
-            
-            if (DirPos != 0)
-            {
-                //Define file type and T:S if not yet denifed
-                if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] == 0)
-                {
-                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = FileType;      //"DEL"
-                }
-                if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] == 0)            //Update T:S pointer only if it doesn't exits
-                {
-                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
-                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
-                }
+            EntryIndex++;
 
-                for (int i = 0; i < 16; i++)
-                {
-                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = 0xa0;
-                }
-
-                for (int i = 0; i < min(16, RowLen); i++)
-                {
-                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = Petscii2DirArt[ScreenCodes[(rc * RowLen) + i]];
-                }
-            }
-            else
+            if ((EntryIndex >= FirstImportedEntry) && (EntryIndex <= LastImportedEntry))
             {
-                return true;
+                FindNextDirPos();
+
+                if (DirPos != 0)
+                {
+                    //Define file type and T:S if not yet denifed
+                    if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] == 0)
+                    {
+                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = FileType;      //"DEL"
+                    }
+                    if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] == 0)            //Update T:S pointer only if it doesn't exits
+                    {
+                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
+                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
+                    }
+
+                    for (int i = 0; i < 16; i++)
+                    {
+                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = 0xa0;
+                    }
+
+                    for (int i = 0; i < min(16, RowLen); i++)
+                    {
+                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = Petscii2DirArt[ScreenCodes[(rc * RowLen) + i]];
+                    }
+                }
+                else
+                {
+                    return true;
+                }
             }
         }
     }
@@ -2176,30 +2212,34 @@ bool ImportFromImage()
             }//Next i
         }//Next cx
 
+        EntryIndex++;
 
-        FindNextDirPos();
-
-        if (DirPos != 0)
+        if ((EntryIndex >= FirstImportedEntry) && (EntryIndex <= LastImportedEntry))
         {
-            if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] == 0)
-            {
-                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = FileType;      //"DEL"
-            }
-            if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] == 0)            //Update T:S pointer only if it doesn't exits
-            {
-                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
-                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
-            }
+            FindNextDirPos();
 
-            for (int i = 0; i < 16; i++)
+            if (DirPos != 0)
             {
-                unsigned int C = Entry[i];
-                Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = Petscii2DirArt[C];
+                if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] == 0)
+                {
+                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = FileType;      //"DEL"
+                }
+                if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] == 0)            //Update T:S pointer only if it doesn't exits
+                {
+                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
+                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
+                }
+
+                for (int i = 0; i < 16; i++)
+                {
+                    unsigned int C = Entry[i];
+                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = Petscii2DirArt[C];
+                }
             }
-        }
-        else
-        {
-            return true;
+            else
+            {
+                return true;
+            }
         }
     }//Next cy
 
@@ -2242,48 +2282,52 @@ void ShowInfo()
 
     cout << "Usage:\n";
     cout << "------\n";
-    cout << "dart input [output.d64] [skipped entries] [default entry type]\n\n";
+    cout << "dart input -o [output.d64] -s [skipped entries] -t [default entry type] -f [first imported entry] -l [last imported entry]\n\n";
 
     cout << "input - the file from which the directory art will be imported. See accepted file types below.\n\n";
 
-    cout << "[output.d64] - the D64 file to which the directory art will be imported. This parameter is optional. If not entered,\n";
-    cout << "       DART will create an input_out.d64 file. The output file name can also be defined in KickAss ASM input files.\n\n";
+    cout << "-o [output.d64] - the D64 file to which the directory art will be imported. This parameter is optional. If not\n";
+    cout << "       entered, DART will create an input_out.d64 file. The output file name can also be defined in KickAss ASM\n";
+    cout << "       input files.\n\n";
 
-    cout << "[skipped entries] - the number of entries in the direcotry of the output.d64 that will be skipped. E.g. use 1 if\n";
-    cout << "       you want to leave the first entry untouched. To append the directory art to the end of the existing directory,\n";
-    cout << "       use + instead of a numeric value. This parameter is optional. If not specified, the default value is 0\n";
-    cout << "       and DART will overwrite all existing directory entries.\n\n";
+    cout << "-s [skipped entries] - the number of entries in the directory of the output.d64 that you don't want to overwrite.\n";
+    cout << "       E.g. use 1 if you want to leave the first entry untouched. To append the directory art to the end of the\n";
+    cout << "       existing directory, use 'all' instead of a numeric value. This parameter is optional. If not specified, the\n";
+    cout << "       default value is 0 and DART will overwrite all existing directory entries.\n\n";
 
-    cout << "[default file type] - DART will use the file type specified here for each directory art entry, if not otherwise\n";
+    cout << "-t [default entry type] - DART will use the file type specified here for each directory art entry, if not otherwise\n";
     cout << "       defined in the input file. Accepted values include: del, prg, usr, seq, *del, del<, etc. This parameter is\n";
-    cout << "       optional. If not specified, DART will use del as default entry type.\n\n";
+    cout << "       optional. If not specified, DART will use del as default entry type. The -t option will be ignored if the\n";
+    cout << "       type is specified in the input file (ASM or D64, see below).\n\n";
 
-    cout << "The [output.d64], [skipped entries], and [default entry type] parameters are optional and they all depend on the\n";
-    cout << "parameter on their left side. This means that the second command line argument is always interpreted as output.d64.\n";
-    cout << "If you want to omit it then you will also need to omit the other two optional parameters. Conversely, if you want to\n";
-    cout << "create PRG directory art entries then first you will also need to provide an output.d64 and the number of entries\n";
-    cout << "to be skipped at the beginning of the directory before the directory art will be added to it.\n\n";
+    cout << "-f [first imported entry] - a numeric value (1-based) which is used by DART to determine the first DirArt entry to be\n";
+    cout << "       imported. This parameter is optional. If not specified, DART will start import with the first DirArt entry.\n\n";
 
-    cout << "You can only import from one input file at a time. DART will replace all existing directory entries in the output\n";
-    cout << "file (after skipping the number of entries defined in [skipped entries]) with the new, imported ones. To append the\n";
-    cout << "imported DirArt to the existing directory entries, use + as [skipped entries]. This way, multiple DirArts can be\n";
-    cout << "imported in the same D64 as long as there is space on track 18. DART does not support directories expanding beyond\n";
-    cout << "track 18. The new entries' type is determined by the [default entry type] parameter or can be defined separately\n";
-    cout << "in D64 and ASM input files.\n\n";
+    cout << "-l [last imported entry] - a numeric value (1-based which DART uses to determine the last DirArt entry to be imported.\n";
+    cout << "       This parameter is optional. If not specified, DART will finish import after the last DirArt entry.\n\n";
+
+    cout << "You can only import from one input file at a time. DART will overwrite the existing directory entries in the output\n";
+    cout << "file (after skipping the number of entries defined with the -s option) with the new, imported ones, leaving only the\n";
+    cout << "track:sector pointers intact. To attach the imported DirArt to the end of the existing directory, use the -s option\n";
+    cout << "with 'all' instead of a number. This allows importing multiple DirArts into the same D64 as long as there is space\n";
+    cout << "on track 18. DART does not support directories expanding beyond track 18. The new entries' type can be modified with\n";
+    cout << "the -t option or it can be defined separately in D64 and KickAss ASM input files. You can also define which DirArt\n";
+    cout << "entries you want to import from the input file using the -f and -l options. Both can take 1-based numbers as values\n";
+    cout << "(i.e., 1 means first).";
 
     cout << "The directory header and ID can only be imported from D64 and ASM files. All other input file types must only\n";
-    cout << "consist of directory entries, without a directory header and ID. In overwrite mode DART will always import the\n";
-    cout << "directory header and ID from D64 and ASM files, if these exist in the input file. In append mode, however, it will\n";
-    cout << "only import them if they are not defined in the output file.\n\n";
+    cout << "consist of directory entries, without a directory header and ID. DART will always import the directory header and ID\n";
+    cout << "from D64 and ASM files, except when the -s option is used with 'all' (append mode), in which case it will only import\n";
+    cout << "them if they are not defined in the output file.\n\n";
 
     cout << "Accepted input file types:\n";
     cout << "--------------------------\n";
-    cout << "D64  - DART will import all directory entries from the input file. The file type, track and sector, and file size\n";
+    cout << "D64  - DART will import all directory entries from the input file. The entry type, track and sector, and file size\n";
     cout << "       will also be imported. In overwrite mode the directory header and ID will be imported if they are defined\n";
     cout << "       in the input D64. In append mode they will only be imported if they are not defined in the output D64.\n\n";
 
     cout << "PRG  - DART accepts two file formats: screen RAM grabs (40-byte long char rows of which the first 16 are used as dir\n";
-    cout << "       entries, can be more than 25 char rows long) and $a0 byte terminated directory entries*. If an $a0 byte is not\n";
+    cout << "       entries, can have more than 25 char rows) and $a0 byte terminated directory entries*. If an $a0 byte is not\n";
     cout << "       detected sooner, then 16 bytes are imported per directory entry. DART then skips up to 24 bytes or until an\n";
     cout << "       $a0 byte detected. Example source code for $a0-terminated .PRG (KickAss format, must be compiled):\n\n";
 
@@ -2299,9 +2343,10 @@ void ShowInfo()
     cout << "ASM  - KickAss ASM DirArt source file. Please refer to Chapter 11 in the Kick Assembler Reference Manual for details.\n";
     cout << "       The ASM file may contain both disk and file parameters within [] brackets. DART recognizes the 'filename',\n";
     cout << "       'name', and 'id' disk parameters and the 'name' and 'type' file parameters. If a 'filename' disk parameter is\n";
-    cout << "       provided, it will overwrite the [output.d64] command-line argument. In overwrite mode the directory header and\n";
-    cout << "       ID will be imported if they are defined in the input D64. In append mode they will only be imported if they\n";
-    cout << "       are not defined in the output D64.\n";
+    cout << "       provided, it will overwrite the -o [output.d64] option. In overwrite mode the directory header and ID will be\n";
+    cout << "       imported if they are defined in the input D64. In append mode they will only be imported if they are not\n";
+    cout << "       defined in the output D64. If a 'type' file parameter is specified then it will be used instead of the default\n";
+    cout << "       entry type defined by the -t option.\n";
     cout << "       Example:\n\n";
 
     cout << "           .disk [filename= \"Test.d64\", name=\"test disk\", id=\"-omg-\"]\n";
@@ -2322,7 +2367,7 @@ void ShowInfo()
     cout << "PNG  - Portable Network Graphics image file. Image input files can only use two colors (background and foreground).\n";
     cout << "       DART will try to identify the colors by looking for a space character. If none found, it will use the darker\n";
     cout << "       of the two colors as background color. Image width must be exactly 16 characters (128 pixels or its multiples\n";
-    cout << "       if the image is resized) and the height must be multiples of 8 pixels. Borders are not allowed. Image files\n";
+    cout << "       if the image is resized) and the height must be a multiple of 8 pixels. Borders are not allowed. Image files\n";
     cout << "       must display the uppercase charset and their appearance cannot rely on command characters. DART uses the\n";
     cout << "       LodePNG library by Lode Vandevenne to decode PNG files.\n\n";
 
@@ -2333,34 +2378,35 @@ void ShowInfo()
     cout << "Example 1:\n";
     cout << "----------\n\n";
 
-    cout << "dart MyDirArt.png\n\n";
+    cout << "dart MyDirArt.pet\n\n";
 
-    cout << "DART will create MyDirArt_out.d64 (if it doesn't already exist), and will import the whole directory of MyDirArt.d64\n";
-    cout << "into it overwriting any existing directory entries, using del as entry type.\n\n";
+    cout << "DART will create MyDirArt_out.d64 (if it doesn't already exist), and will import all DirArt entries from MyDirArt.pet\n";
+    cout << "into it, overwriting all existing directory entries, using del as entry type.\n\n";
 
     cout << "Example 2:\n";
     cout << "----------\n\n";
 
-    cout << "dart MyDirArt.c MyDemo.d64\n\n";
+    cout << "dart MyDirArt.c -o MyDemo.d64\n\n";
 
     cout << "DART will import the DirArt from a Marq's PETSCII Editor C array file into MyDemo.d64 overwriting all existing\n";
-    cout << "directory entries.\n\n";
+    cout << "directory entries, using del as entry type.\n\n";
 
     cout << "Example 3:\n";
     cout << "----------\n\n";
 
-    cout << "dart MyDirArt.asm MyDemo.d64 +\n\n";
+    cout << "dart MyDirArt.asm -o MyDemo.d64 -s all\n\n";
 
     cout << "DART will append the DirArt from a KickAss ASM source file to the existing directory entries of MyDemo.d64.\n\n";
 
     cout << "Example 4:\n";
     cout << "----------\n\n";
 
-    cout << "dart MyDirArt1.png MyDemo.d64 1 del\n";
-    cout << "dart MyDirArt2.png MyDemo.d64 + del\n\n";
+    cout << "dart MyDirArt1.png -o MyDemo.d64 -s 1 -t prg\n";
+    cout << "dart MyDirArt2.png -o MyDemo.d64 -s all -f 3 -l 7\n\n";
 
     cout << "DART will first import the DirArt from a PNG image file into MyDemo.d64 overwriting all directory entries except\n";
-    cout << "the first one. Then DART will append the DirArt from the second PNG file to the directory of MyDemo.d64.\n";
+    cout << "the first one, using prg as entry type. Then DART will append entries 3-7 from the second PNG file to the directory\n";
+    cout << "of MyDemo.d64 (keeping all already existing entries in it), using del as entry type.\n";
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
@@ -2379,11 +2425,16 @@ int main(int argc, char* argv[])
     #ifdef DEBUG
         InFileName = "c:/Users/Tamas/OneDrive/C64/Coding/Atlantis/Aullido/art2.c";
         OutFileName = "c:/Users/Tamas/OneDrive/C64/Coding/Atlantis/Aullido/test.d64";
-        argSkippedEntries = "+";
-        argFileType = "del";
+        argSkippedEntries = "all";
+        argEntryType = "del";
 #else
 
-        cout << "Usage: dart input [output.d64] [skipped entries] [default entry type]\n\n";
+        cout << "Usage: dart input [options]\n";
+        cout << "options:    -o [output.d64]\n";
+        cout << "            -s [skipped entries in output.64]\n";
+        cout << "            -t [default entry type]\n";
+        cout << "            -f [first imported entry (1-based)]\n";
+        cout << "            -l [last imported entry (1-based)]\n\n";
         cout << "Help:  dart -?\n";
         return EXIT_SUCCESS;
 
@@ -2391,26 +2442,91 @@ int main(int argc, char* argv[])
 
     }
     
-    if (argc > 1)
+    vector <string> args;
+    args.resize(argc);
+
+    for (int c = 0; c < argc; c++)
     {
-        InFileName = argv[1];
-    }
-    
-    if (argc > 2)
-    {
-        OutFileName = argv[2];
+        args[c] = argv[c];
     }
 
-    if (argc > 3)
+
+    int i = 1;
+
+    while (i < argc)
     {
-        argSkippedEntries = argv[3];
+        if (i == 1)
+        {
+            InFileName = args[1];
+        }
+        else if (args[i] == "-o")
+        {
+            if (i + 1 < argc)
+            {
+                OutFileName = args[++i];
+            }
+            else
+            {
+                cerr << "***CRITICAL***\tMissing [output.d64] parameter.\n";//DART will create an input_out.d64.\n";
+                return EXIT_FAILURE;
+            }
+        }
+        else if (args[i] == "-s")
+        {
+            if (i + 1 < argc)
+            {
+                argSkippedEntries = args[++i];
+            }
+            else
+            {
+                cerr << "***CRITICAL***\tMissing [skipped entries] parameter.\n";    //DART will overwrite every existing directory entry in output.d64.\n";
+                return EXIT_FAILURE;
+            }
+        }
+        else if (args[i] == "-t")
+        {
+            if (i + 1 < argc)
+            {
+                argEntryType = args[++i];
+            }
+            else
+            {
+                cerr << "***CRITICAL***\tMissing [default entry type] parameter.\n"; //DART will used DEL as default entry type.\n";
+                return EXIT_FAILURE;
+            }
+        }
+        else if (args[i] == "-f")
+        {
+            if (i + 1 < argc)
+            {
+                argFirstImportedEntry = args[++i];
+            }
+            else
+            {
+                cerr << "***CRITICAL***\tMissing [first imported entry] parameter.\n";   //DART will start import with the first entry in the input file.\n";
+                return EXIT_FAILURE;
+            }
+        }
+        else if (args[i] == "-l")
+        {
+            if (i + 1 < argc)
+            {
+                argLastImportedEntry = args[++i];
+            }
+            else
+            {
+                cerr << "***CRITICAL***\tMissing [last imported entry] parameter.\n";    //DART will finish import with the last entry in the input file.\n";
+                return EXIT_FAILURE;
+            }
+        }
+        else
+        {
+            cerr << "***CRITICAL***\tUnrecognized option: " << args[i] << "\n";
+            return EXIT_FAILURE;
+        }
+        i++;
     }
     
-    if (argc == 5)
-    {
-        argFileType = argv[4];
-    }
-
     if (InFileName == "")
     {
         cerr << "***CRITICAL***\tMissing input file name!\n";
@@ -2423,7 +2539,7 @@ int main(int argc, char* argv[])
         return EXIT_SUCCESS;
     }
 
-    if (argSkippedEntries == "+")
+    if (argSkippedEntries == "all")
     {
         AppendMode = true;
     }
@@ -2435,72 +2551,106 @@ int main(int argc, char* argv[])
         }
         else
         {
-            cerr << "***CRITICAL***\tUnrecognized [skipped entries] argument!\n";
+            cerr << "***CRITICAL***\tUnrecognized [skipped entries] parameter!\n";
             return EXIT_FAILURE;
         }
     }
 
-    for (size_t i = 0; i < argFileType.length(); i++)
+    for (size_t i = 0; i < argEntryType.length(); i++)
     {
-        argFileType[i] = toupper(argFileType[i]);
+        argEntryType[i] = toupper(argEntryType[i]);
     }
     
-    if (argFileType == "*SEQ")
+    if (argEntryType == "*SEQ")
     {
         FileType = 0x01;
     }
-    else if (argFileType == "*PRG")
+    else if (argEntryType == "*PRG")
     {
         FileType = 0x02;
     }
-    else if (argFileType == "*USR")
+    else if (argEntryType == "*USR")
     {
         FileType = 0x03;
     }
-    else if (argFileType == "DEL<")
+    else if (argEntryType == "DEL<")
     {
         FileType = 0xc0;
     }
-    else if (argFileType == "SEQ<")
+    else if (argEntryType == "SEQ<")
     {
         FileType = 0xc1;
     }
-    else if (argFileType == "PRG<")
+    else if (argEntryType == "PRG<")
     {
         FileType = 0xc2;
     }
-    else if (argFileType == "USR<")
+    else if (argEntryType == "USR<")
     {
         FileType = 0xc3;
     }
-    else if (argFileType == "REL<")
+    else if (argEntryType == "REL<")
     {
         FileType = 0xc4;
     }
-    else if (argFileType == "DEL")
+    else if (argEntryType == "DEL")
     {
         FileType = 0x80;
     }
-    else if (argFileType == "SEQ")
+    else if (argEntryType == "SEQ")
     {
         FileType = 0x81;
     }
-    else if (argFileType == "PRG")
+    else if (argEntryType == "PRG")
     {
         FileType = 0x82;
     }
-    else if (argFileType == "USR")
+    else if (argEntryType == "USR")
     {
         FileType = 0x83;
     }
-    else if (argFileType == "REL")
+    else if (argEntryType == "REL")
     {
         FileType = 0x84;
     }
     else
     {
-        cerr << "***CRITICAL*** unrecognized default file type parameter!\n";
+        cerr << "***CRITICAL***\tUnrecognized default file type parameter!\n";
         return EXIT_FAILURE;
+    }
+
+    if (argFirstImportedEntry != "")
+    {
+        if (IsNumeric(argFirstImportedEntry))
+        {
+            FirstImportedEntry = ConvertStringToInt(argFirstImportedEntry);
+        }
+        else
+        {
+            cerr << "***CRITICAL***\tThe [first imported entry] parameter must be numeric.\n";
+            return EXIT_FAILURE;
+        }
+    }
+    else
+    {
+        argFirstImportedEntry = "1";
+    }
+
+    if (argLastImportedEntry != "")
+    {
+        if (IsNumeric(argLastImportedEntry))
+        {
+            LastImportedEntry = ConvertStringToInt(argLastImportedEntry);
+        }
+        else
+        {
+            cerr << "***CRITICAL***\tThe [last imported entry] parameter must be numeric.\n";
+            return EXIT_FAILURE;
+        }
+    }
+    else
+    {
+        argLastImportedEntry = "last";
     }
 
     if (!fs::exists(InFileName))
@@ -2544,84 +2694,100 @@ int main(int argc, char* argv[])
     if (!OpenOutFile())
         return EXIT_FAILURE;
 
+    string Msg = "";
+
+    if ((FirstImportedEntry != 1) || (LastImportedEntry != 0xffff))
+    {
+        Msg = "Importing DirArt entries: " + argFirstImportedEntry + " through " + argLastImportedEntry + "\n";
+    }
+    else
+    {
+        Msg = "Importing DirArt entries: all\n";
+    }
+
     if (AppendMode)
     {
-        cout << "Import mode: Append\n";
-        //Lets find the last used dir entry slot, we will continue with the next, empty one
+        Msg += "Import mode: Append, skipping all existing directory entries in " + OutFileName + "\n";
+        
+        //Let's find the last used dir entry slot, we will continue with the next, empty one
         if (!FindLastUsedDirPos())
             return EXIT_FAILURE;
     }
     else
     {
-        cout << "Import mode: Overwrite\n";
+        Msg += "Import mode: Overwrite";
         if (NumSkippedEntries > 0)
         {
-            cout << "Skipping " << NumSkippedEntries << " directory " << ((NumSkippedEntries == 1) ? "entry\n" : "entries\n");
+            Msg += ", skipping " + argSkippedEntries + " directory " + ((NumSkippedEntries == 1) ? "entry in " : "entries in ") + OutFileName + "\n";
+        }
+        else
+        {
+            Msg += "\n";
         }
 
         if (!ResetDirEntries())
             return EXIT_FAILURE;
     }
 
-    cout << "Default directory art file type: " << argFileType << "\n";
+    Msg += "Default DirArt entry type: " + argEntryType + "\n";
 
     if (DirArtType == "d64")
     {
-        cout <<"Importing DirArt from D64...\n";
+        cout <<"Importing DirArt from D64...\n" << Msg;
         if (!ImportFromD64())               //Import from another D64
             return EXIT_FAILURE;
     }
     else if (DirArtType == "txt")
     {
-        cout << "Importing DirArt from text file...\n";
+        cout << "Importing DirArt from text file...\n" << Msg;
         if (!ImportFromTxt())               //Import from a text file, 16 characters per text line
             return EXIT_FAILURE;
     }
     else if (DirArtType == "prg")
     {
-        cout << "Importing DirArt from PRG...\n";
+        cout << "Importing DirArt from PRG...\n" << Msg;
         if (!ImportFromBinary())            //Import from a PRG file, first 16 bytes from each 40, or until 0xa0 charaxter found
             return EXIT_FAILURE;
     }
     else if (DirArtType == "c")
     {
-        cout << "Importing DirArt from Marq's PETSCII Editor C array file...\n";
+        cout << "Importing DirArt from Marq's PETSCII Editor C array file...\n" << Msg;
         if (!ImportFromCArray())            //Import from Marq's PETSCII Editor C array file to D64
             return EXIT_FAILURE;
     }
     else if (DirArtType == "asm")
     {
-        cout << "Importing DirArt from KickAss ASM source...\n";
+        cout << "Importing DirArt from KickAss ASM source...\n" << Msg;
         if (!ImportFromAsm())               //Import KickAss ASM dirart file to D64
             return EXIT_FAILURE;
     }
     else if (DirArtType == "json")
     {
-        cout << "Importing DirArt from JSON source...\n";
+        cout << "Importing DirArt from JSON source...\n" << Msg;
         if (!ImportFromJson())              //Import from a JSON file
             return EXIT_FAILURE;
     }
     else if (DirArtType == "pet")
     {
-        cout << "Importing DirArt from PET source...\n";
+        cout << "Importing DirArt from PET source...\n" << Msg;
         if (!ImportFromPet())               //Import from PET binary
             return EXIT_FAILURE;
     }
     else if (DirArtType == "png")
     {
-        cout << "Importing DirArt from PNG image...\n";
+        cout << "Importing DirArt from PNG image...\n" << Msg;
         if (!ImportFromImage())             //Import from PNG image using LodePNG (Copyright (c) 2005-2023 Lode Vandevenne)
             return EXIT_FAILURE;
     }
     else if (DirArtType == "bmp")
     {
-        cout << "Importing DirArt from BMP image...\n";
+        cout << "Importing DirArt from BMP image...\n" << Msg;
         if (!ImportFromImage())             //Import from BMP image
             return EXIT_FAILURE;
     }
     else
     {
-        cout << "Importing DirArt from binary file...\n";
+        cout << "Importing DirArt from binary file...\n" << Msg;
         if (!ImportFromBinary())            //Import from any other file, first 16 bytes of each 40 or until 0xa0 character found
             return EXIT_FAILURE;
     }
