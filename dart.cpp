@@ -19,6 +19,8 @@ string argSkippedEntries = "";
 string argEntryType = "DEL";
 string argFirstImportedEntry = "";
 string argLastImportedEntry = "";
+string argDiskName = "";
+string argDiskID = "";
 
 unsigned char FileType = 0x80;  //Default file type is DEL
 int NumSkippedEntries = 0;      //We are overwriting the whole directory by default
@@ -737,7 +739,6 @@ void CorrectFilePathSeparators()
 
 bool ImportFromD64()
 {
-
     vector <unsigned char> DA;
 
     if (ReadBinaryFile(InFileName, DA) == -1)
@@ -772,7 +773,11 @@ bool ImportFromD64()
 
                     if (DirPos != 0)
                     {
-                        for (int i = 0; i < 30; i++)     //Include file type and T:S, as well as file size
+                        //Update file type indicator
+                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos] = DA[DAPtr + b];
+                        
+                        //Update dir entry's name and block size, skipping T:S pointer
+                        for (int i = 3; i < 30; i++)
                         {
                             Disk[Track[DirTrack] + (DirSector * 256) + DirPos + i] = DA[DAPtr + b + i];
                         }
@@ -788,27 +793,33 @@ bool ImportFromD64()
         S = DA[DAPtr + 1];
     }
 
-    //Import directory header only if one exists in input disk image but none in the output disk image or we are in Overwrite mode
-    if (DA[Track[18] + 0x90] != 0xa0)
+    if (DA[Track[18] + 0x90] != 0xa0)   //Import directory header only if one exists in input disk image
     {
-        if ((!AppendMode) || (Disk[Track[18] + 0x90] == 0xa0))
+        for (int i = 0; i < 16; i++)
         {
-            for (int i = 0; i < 16; i++)
-            {
-                Disk[Track[18] + 0x90 + i] = DA[Track[18] + 0x90 + i];
-            }
+            Disk[Track[18] + 0x90 + i] = DA[Track[18] + 0x90 + i];
+        }
+    }
+    else if (argDiskName != "")         //Otherwise, check if disk name is specified in command line
+    {
+        for (int i = 0; i < 16; i++)
+        {
+            Disk[Track[18] + 0x90 + i] = Ascii2DirArt[toupper(argDiskName[i])];
         }
     }
 
-    //Import directory ID only if one exists in input disk image but none in the output disk image or we are in Overwrite mode
-    if (DA[Track[18] + 0xa2] != 0xa0)
+    if (DA[Track[18] + 0xa2] != 0xa0)    //Import directory ID only if one exists in input disk image
     {
-        if ((!AppendMode) || (Disk[Track[18] + 0xa2] == 0xa0))
+        for (int i = 0; i < 5; i++)
         {
-            for (int i = 0; i < 5; i++)
-            {
-                Disk[Track[18] + 0xa2 + i] = DA[Track[18] + 0xa2 + i];
-            }
+            Disk[Track[18] + 0xa2 + i] = DA[Track[18] + 0xa2 + i];
+        }
+    }
+    else if (argDiskID != "")           //Otherwise, check if disk ID is specified in command line
+    {
+        for (int i = 0; i < 5; i++)
+        {
+            Disk[Track[18] + 0xa2 + i] = Ascii2DirArt[toupper(argDiskID[i])];
         }
     }
 
@@ -1500,17 +1511,17 @@ bool AddAsmDiskParameters()
 
     if (DirHeader != "")
     {
-        if ((!AppendMode) || (Disk[Track[18] + 0x90] == 0xa0))
-        {
         for (size_t i = 0; i < 16; i++)
-            if (i < DirHeader.size())
-            {
-                Disk[Track[18] + 0x90 + i] = Ascii2DirArt[toupper(DirHeader[i])];
-            }
-            else
-            {
-                Disk[Track[18] + 0x90 + i] = 0xa0;
-            }
+        {
+            DirHeader += 0xa0;
+            Disk[Track[18] + 0x90 + i] = Ascii2DirArt[toupper(DirHeader[i])];
+        }
+    }
+    else if (argDiskName != "")
+    {
+        for (size_t i = 0; i < 16; i++)
+        {
+            Disk[Track[18] + 0x90 + i] = Ascii2DirArt[toupper(argDiskName[i])];
         }
     }
 
@@ -1541,17 +1552,17 @@ bool AddAsmDiskParameters()
 
     if (DirID != "")
     {
-        if ((!AppendMode) || (Disk[Track[18] + 0xa2] == 0xa0))
+        for (size_t i = 0; i < 5; i++)
         {
-            for (size_t i = 0; i < 5; i++)
-            if (i < DirID.size())
-            {
-                Disk[Track[18] + 0xa2 + i] = Ascii2DirArt[toupper(DirID[i])];
-            }
-            else
-            {
-                Disk[Track[18] + 0xa2 + i] = 0xa0;
-            }
+            DirID += 0xa0;
+            Disk[Track[18] + 0xa2 + i] = Ascii2DirArt[toupper(DirID[i])];
+        }
+    }
+    else if (argDiskID != "")
+    {
+        for (size_t i = 0; i < 5; i++)
+        {
+            Disk[Track[18] + 0xa2 + i] = Ascii2DirArt[toupper(argDiskID[i])];
         }
     }
 
@@ -2282,13 +2293,22 @@ void ShowInfo()
 
     cout << "Usage:\n";
     cout << "------\n";
-    cout << "dart input -o [output.d64] -s [skipped entries] -t [default entry type] -f [first imported entry] -l [last imported entry]\n\n";
+    cout << "dart input -o [output.d64] -n [disk name] -i [disk id] -s [skipped entries] -t [default entry type]\n";
+    cout << "           -f[first imported entry] - l[last imported entry]\n\n";
 
     cout << "input - the file from which the directory art will be imported. See accepted file types below.\n\n";
 
-    cout << "-o [output.d64] - the D64 file to which the directory art will be imported. This parameter is optional. If not\n";
-    cout << "       entered, DART will create an input_out.d64 file. The output file name can also be defined in KickAss ASM\n";
-    cout << "       input files.\n\n";
+    cout << "-o [output.d64] - the D64 file to which the directory art will be imported. This parameter is optional and it will be\n";
+    cout << "       ignored if it is used with KickAss ASM input files that include the 'filename' disk parameter. If an output\n";
+    cout << "       D64 name is not specified, DART will create an input_out.d64 file.\n\n";
+
+    cout << "-n [\"disk name\"] - the output D64's disk name (left side of the topmost inverted row of the directory listing), max.\n";
+    cout << "       16 characters. Wrap text in double quotes. This parameter is optional and it will be ignored if it is used\n";
+    cout << "       with D64 and ASM files that contain this information.\n\n";
+
+    cout << "-i [\"disk id\"] - the output d64's disk ID (right side of the topmost inverted row of the directory listing), max. 5\n";
+    cout << "       characters. Wrap text in double quotes. This parameter is optional and it will be ignored if it is used with\n";;
+    cout << "       D64 and ASM files that contain this information.\n\n";
 
     cout << "-s [skipped entries] - the number of entries in the directory of the output.d64 that you don't want to overwrite.\n";
     cout << "       E.g. use 1 if you want to leave the first entry untouched. To append the directory art to the end of the\n";
@@ -2311,20 +2331,15 @@ void ShowInfo()
     cout << "track:sector pointers intact. To attach the imported DirArt to the end of the existing directory, use the -s option\n";
     cout << "with 'all' instead of a number. This allows importing multiple DirArts into the same D64 as long as there is space\n";
     cout << "on track 18. DART does not support directories expanding beyond track 18. The new entries' type can be modified with\n";
-    cout << "the -t option or it can be defined separately in D64 and KickAss ASM input files. You can also define which DirArt\n";
-    cout << "entries you want to import from the input file using the -f and -l options. Both can take 1-based numbers as values\n";
-    cout << "(i.e., 1 means first).";
-
-    cout << "The directory header and ID can only be imported from D64 and ASM files. All other input file types must only\n";
-    cout << "consist of directory entries, without a directory header and ID. DART will always import the directory header and ID\n";
-    cout << "from D64 and ASM files, except when the -s option is used with 'all' (append mode), in which case it will only import\n";
-    cout << "them if they are not defined in the output file.\n\n";
+    cout << "the -t option or it can be defined separately in D64 and KickAss ASM input files. You can also define the first and\n";
+    cout << "last DirArt entries you want to import from the input file using the -f and -l options. Both can take 1-based numbers\n";
+    cout << "as values (i.e., 1 means first).\n\n";
 
     cout << "Accepted input file types:\n";
     cout << "--------------------------\n";
-    cout << "D64  - DART will import all directory entries from the input file. The entry type, track and sector, and file size\n";
-    cout << "       will also be imported. In overwrite mode the directory header and ID will be imported if they are defined\n";
-    cout << "       in the input D64. In append mode they will only be imported if they are not defined in the output D64.\n\n";
+    cout << "D64  - DART will import all directory entries from the input file. The disk name, ID, and the entry types will also\n";
+    cout << "       be imported. The track and sector pointers will be left untouched in the output D64. The -n and -i options\n";
+    cout << "       will be ignored.\n\n";
 
     cout << "PRG  - DART accepts two file formats: screen RAM grabs (40-byte long char rows of which the first 16 are used as dir\n";
     cout << "       entries, can have more than 25 char rows) and $a0 byte terminated directory entries*. If an $a0 byte is not\n";
@@ -2342,11 +2357,9 @@ void ShowInfo()
 
     cout << "ASM  - KickAss ASM DirArt source file. Please refer to Chapter 11 in the Kick Assembler Reference Manual for details.\n";
     cout << "       The ASM file may contain both disk and file parameters within [] brackets. DART recognizes the 'filename',\n";
-    cout << "       'name', and 'id' disk parameters and the 'name' and 'type' file parameters. If a 'filename' disk parameter is\n";
-    cout << "       provided, it will overwrite the -o [output.d64] option. In overwrite mode the directory header and ID will be\n";
-    cout << "       imported if they are defined in the input D64. In append mode they will only be imported if they are not\n";
-    cout << "       defined in the output D64. If a 'type' file parameter is specified then it will be used instead of the default\n";
-    cout << "       entry type defined by the -t option.\n";
+    cout << "       'name', and 'id' disk parameters and the 'name' and 'type' file parameters. If disk parameters are provided\n";
+    cout << "       they will overwrite the -o, -n, and -i options. If a 'type' file parameter is specified then it will be used\n";
+    cout << "       instead of the default entry type defined by the -t option.\n";
     cout << "       Example:\n\n";
 
     cout << "           .disk [filename= \"Test.d64\", name=\"test disk\", id=\"-omg-\"]\n";
@@ -2386,10 +2399,10 @@ void ShowInfo()
     cout << "Example 2:\n";
     cout << "----------\n\n";
 
-    cout << "dart MyDirArt.c -o MyDemo.d64\n\n";
+    cout << "dart MyDirArt.c -o MyDemo.d64 -n \"demo 2023\" -i \"-omg-\"\n\n";
 
     cout << "DART will import the DirArt from a Marq's PETSCII Editor C array file into MyDemo.d64 overwriting all existing\n";
-    cout << "directory entries, using del as entry type.\n\n";
+    cout << "directory entries, using del as entry type, and it will update the disk name and ID in MyDemo.d64.\n\n";
 
     cout << "Example 3:\n";
     cout << "----------\n\n";
@@ -2427,21 +2440,21 @@ int main(int argc, char* argv[])
         OutFileName = "c:/Users/Tamas/OneDrive/C64/Coding/Atlantis/Aullido/test.d64";
         argSkippedEntries = "all";
         argEntryType = "del";
-#else
-
+    #else
         cout << "Usage: dart input [options]\n";
         cout << "options:    -o [output.d64]\n";
+        cout << "            -n [\"disk name\"]\n";
+        cout << "            -i [\"disk id\"]\n";
         cout << "            -s [skipped entries in output.64]\n";
         cout << "            -t [default entry type]\n";
-        cout << "            -f [first imported entry (1-based)]\n";
-        cout << "            -l [last imported entry (1-based)]\n\n";
+        cout << "            -f [first imported entry]\n";
+        cout << "            -l [last imported entry]\n\n";
         cout << "Help:  dart -?\n";
         return EXIT_SUCCESS;
-
     #endif
 
     }
-    
+
     vector <string> args;
     args.resize(argc);
 
@@ -2449,7 +2462,6 @@ int main(int argc, char* argv[])
     {
         args[c] = argv[c];
     }
-
 
     int i = 1;
 
@@ -2459,7 +2471,7 @@ int main(int argc, char* argv[])
         {
             InFileName = args[1];
         }
-        else if (args[i] == "-o")
+        else if ((args[i] == "-o") || (args[i] == "-O"))        //output D64
         {
             if (i + 1 < argc)
             {
@@ -2467,11 +2479,45 @@ int main(int argc, char* argv[])
             }
             else
             {
-                cerr << "***CRITICAL***\tMissing [output.d64] parameter.\n";//DART will create an input_out.d64.\n";
+                cerr << "***CRITICAL***\tMissing [output.d64] parameter.\n";
                 return EXIT_FAILURE;
             }
         }
-        else if (args[i] == "-s")
+        else if ((args[i] == "-n") || (args[i] == "-N"))       //disk name in output D64
+        {
+            if (i + 1 < argc)
+            {
+                argDiskName = args[++i];
+
+                for (int j = 0; j < 16; j++)
+                {
+                    argDiskName += 0xa0;
+                }
+            }
+            else
+            {
+                cerr << "***CRITICAL***\tMissing [disk name] parameter.\n";
+                return EXIT_FAILURE;
+            }
+        }
+        else if ((args[i] == "-i") || (args[i] == "-I"))       //disk ID in output D64
+        {
+            if (i + 1 < argc)
+            {
+                argDiskID = args[++i];
+
+                for (int j = 0; j < 5; j++)
+                {
+                    argDiskID += 0xa0;
+                }
+            }
+            else
+            {
+                cerr << "***CRITICAL***\tMissing [disk id] parameter.\n";
+                return EXIT_FAILURE;
+            }
+        }
+        else if ((args[i] == "-s") || (args[i] == "-S"))       //skipped entries in output D64's directory
         {
             if (i + 1 < argc)
             {
@@ -2479,11 +2525,11 @@ int main(int argc, char* argv[])
             }
             else
             {
-                cerr << "***CRITICAL***\tMissing [skipped entries] parameter.\n";    //DART will overwrite every existing directory entry in output.d64.\n";
+                cerr << "***CRITICAL***\tMissing [skipped entries] parameter.\n";
                 return EXIT_FAILURE;
             }
         }
-        else if (args[i] == "-t")
+        else if ((args[i] == "-t") || (args[i] == "-T"))       //default entry type in output D64
         {
             if (i + 1 < argc)
             {
@@ -2491,11 +2537,11 @@ int main(int argc, char* argv[])
             }
             else
             {
-                cerr << "***CRITICAL***\tMissing [default entry type] parameter.\n"; //DART will used DEL as default entry type.\n";
+                cerr << "***CRITICAL***\tMissing [default entry type] parameter.\n";
                 return EXIT_FAILURE;
             }
         }
-        else if (args[i] == "-f")
+        else if ((args[i] == "-f") || (args[i] == "-F"))       //first imported entry from input
         {
             if (i + 1 < argc)
             {
@@ -2503,11 +2549,11 @@ int main(int argc, char* argv[])
             }
             else
             {
-                cerr << "***CRITICAL***\tMissing [first imported entry] parameter.\n";   //DART will start import with the first entry in the input file.\n";
+                cerr << "***CRITICAL***\tMissing [first imported entry] parameter.\n";
                 return EXIT_FAILURE;
             }
         }
-        else if (args[i] == "-l")
+        else if ((args[i] == "-l") || (args[i] == "-L"))       //last imported entry from input
         {
             if (i + 1 < argc)
             {
@@ -2515,7 +2561,7 @@ int main(int argc, char* argv[])
             }
             else
             {
-                cerr << "***CRITICAL***\tMissing [last imported entry] parameter.\n";    //DART will finish import with the last entry in the input file.\n";
+                cerr << "***CRITICAL***\tMissing [last imported entry] parameter.\n";
                 return EXIT_FAILURE;
             }
         }
@@ -2790,6 +2836,26 @@ int main(int argc, char* argv[])
         cout << "Importing DirArt from binary file...\n" << Msg;
         if (!ImportFromBinary())            //Import from any other file, first 16 bytes of each 40 or until 0xa0 character found
             return EXIT_FAILURE;
+    }
+
+    //Finally, update the directory header and ID (done separately for ASM and D64 input files)
+    if ((DirArtType != "asm") && (DirArtType != "d64"))
+    {
+        if (argDiskName != "")
+        {
+            for (int i = 0; i < 16; i++)
+            {
+                Disk[Track[18] + 0x90 + i] = Ascii2DirArt[toupper(argDiskName[i])];
+            }
+        }
+
+        if (argDiskID != "")
+        {
+            for (int i = 0; i < 5; i++)
+            {
+                Disk[Track[18] + 0xa2 + i] = Ascii2DirArt[toupper(argDiskID[i])];
+            }
+        }
     }
 
     if (!WriteDiskImage(OutFileName))
