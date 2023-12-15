@@ -1178,8 +1178,8 @@ bool ImportFromCArray() {
     int RowLen = min(ConvertStringToInt(sRowLen), 16);
     int RowCnt = min(ConvertStringToInt(sRowCnt), 48);
 
-    size_t First = DA.find("{");
-    //size_t Last = DA.find("}");
+    size_t First = DA.find('{');
+    //size_t Last = DA.find('}');
 
     DA.erase(0, First + 1);
 
@@ -1250,13 +1250,13 @@ bool AddAsmDirEntry(string AsmDirEntry)
 
     if (NumSegments > 1)
     {
-        if ((EntrySegments[0].find("[") != string::npos) && (EntrySegments[0].find("name") != string::npos) && (EntrySegments[0].find("=") != string::npos))
+        if ((EntrySegments[0].find('[') != string::npos) && (EntrySegments[0].find("name") != string::npos) && (EntrySegments[0].find('=') != string::npos))
         {
             //FileType = 0x80;  //DEL default file type
 
             if (NumSegments > 3)
             {
-                if ((EntrySegments[2].find("type") != string::npos) && (EntrySegments[2].find("=") != string::npos))
+                if ((EntrySegments[2].find("type") != string::npos) && (EntrySegments[2].find('=') != string::npos))
                 {
                     if (EntrySegments[3] == "*seq")
                     {
@@ -1330,7 +1330,7 @@ bool AddAsmDirEntry(string AsmDirEntry)
                         Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
                     }
 
-                    if (EntrySegments[0].find("@") != string::npos)
+                    if (EntrySegments[0].find('@') != string::npos)
                     {
                         //Numeric entry
                         unsigned char Entry[16];
@@ -1360,7 +1360,7 @@ bool AddAsmDirEntry(string AsmDirEntry)
                             if (Values[v] != "")
                             {
                                 unsigned char NextChar = 0x20;          //SPACE default char - if conversion is not possible
-                                if (Values[v].find("$") == 0)
+                                if (Values[v].find('$') == 0)
                                 {
                                     //Hex Entry
                                     Values[v].erase(0, 1);
@@ -1450,12 +1450,12 @@ bool AddAsmDiskParameters()
         DiskName.erase(0, DiskName.find(delimiter) + delimiter.length());
         DirEntry.erase(DirEntry.find(delimiter), DirEntry.find(delimiter) + delimiter.length());
         
-        if (DiskName.find("\"") != string::npos)
+        if (DiskName.find('\"') != string::npos)
         {
-            DiskName = DiskName.substr(DiskName.find("\"") + 1);
-            if (DiskName.find("\"") != string::npos)
+            DiskName = DiskName.substr(DiskName.find('\"') + 1);
+            if (DiskName.find('\"') != string::npos)
             {
-                DiskName = DiskName.substr(0, DiskName.find("\""));
+                DiskName = DiskName.substr(0, DiskName.find('\"'));
             }
             else
             {
@@ -1491,12 +1491,12 @@ bool AddAsmDiskParameters()
         DirHeader = DirEntry;
         DirHeader.erase(0, DirHeader.find(delimiter) + delimiter.length());
         
-        if (DirHeader.find("\"") != string::npos)
+        if (DirHeader.find('\"') != string::npos)
         {
-            DirHeader = DirHeader.substr(DirHeader.find("\"") + 1);
-            if (DirHeader.find("\"") != string::npos)
+            DirHeader = DirHeader.substr(DirHeader.find('\"') + 1);
+            if (DirHeader.find('\"') != string::npos)
             {
-                DirHeader = DirHeader.substr(0, DirHeader.find("\""));
+                DirHeader = DirHeader.substr(0, DirHeader.find('\"'));
             }
             else
             {
@@ -1532,12 +1532,12 @@ bool AddAsmDiskParameters()
         DirID = DirEntry;
         DirID.erase(0, DirID.find(delimiter) + delimiter.length());
 
-        if (DirID.find("\"") != string::npos)
+        if (DirID.find('\"') != string::npos)
         {
-            DirID = DirID.substr(DirID.find("\"") + 1);
-            if (DirID.find("\"") != string::npos)
+            DirID = DirID.substr(DirID.find('\"') + 1);
+            if (DirID.find('\"') != string::npos)
             {
-                DirID = DirID.substr(0, DirID.find("\""));
+                DirID = DirID.substr(0, DirID.find('\"'));
             }
             else
             {
@@ -1589,7 +1589,7 @@ bool ImportFromAsm()
     {
         DirEntry = DirArt.substr(0, DirArt.find(delimiter));
         DirArt.erase(0, DirArt.find(delimiter) + delimiter.length());
-        string EntryType = DirEntry.substr(0, DirEntry.find("["));
+        string EntryType = DirEntry.substr(0, DirEntry.find('['));
 
         for (size_t i = 0; i < EntryType.length(); i++)
         {
@@ -1611,7 +1611,7 @@ bool ImportFromAsm()
     if ((DirArt != "") && (DirPos != 0))
     {
         DirEntry = DirArt;
-        string EntryType = DirEntry.substr(0, DirEntry.find("["));
+        string EntryType = DirEntry.substr(0, DirEntry.find('['));
 
         for (size_t i = 0; i < EntryType.length(); i++)
         {
@@ -1730,9 +1730,9 @@ bool ImportFromJson()
     {
         //find numeric string between "width":XX,
         string W = DirArt.substr(DirArt.find("width"));
-        W = W.substr(W.find(":") + 1);
-        W = W.substr(0, W.find(","));
-        while (W.find(" ") != string::npos)
+        W = W.substr(W.find(':') + 1);
+        W = W.substr(0, W.find(','));
+        while (W.find(' ') != string::npos)
         {
             //Remove space characters if there's any
             W.replace(W.find (" "),1,"");
@@ -1747,12 +1747,12 @@ bool ImportFromJson()
     {
         //find numeric string between "height":XX,
         string H = DirArt.substr(DirArt.find("height"));
-        H = H.substr(H.find(":") + 1);
-        H = H.substr(0, H.find(","));
-        while (H.find(" ") != string::npos)
+        H = H.substr(H.find(':') + 1);
+        H = H.substr(0, H.find(','));
+        while (H.find(' ') != string::npos)
         {
             //Remove space characters if there's any
-            H.replace(H.find(" "), 1, "");
+            H.replace(H.find(' '), 1, "");
         }
         if ((H.length() > 0) && (IsNumeric(H)))
         {
@@ -1765,20 +1765,20 @@ bool ImportFromJson()
     {
         //find numeric string between "height":XX,
         string S = DirArt.substr(DirArt.find("screencodes"));
-        S = S.substr(S.find("[") + 1);
-        S = S.substr(0, S.find("]"));
-        while (S.find(" ") != string::npos)
+        S = S.substr(S.find('[') + 1);
+        S = S.substr(0, S.find(']'));
+        while (S.find(' ') != string::npos)
         {
             //Remove space characters if there's any
-            S.replace(S.find(" "), 1, "");
+            S.replace(S.find(' '), 1, "");
         }
 
         size_t p = 0;
 
-        while (S.find(",") != string::npos)
+        while (S.find(',') != string::npos)
         {
-            string B = S.substr(0, S.find(","));
-            S.erase(0, S.find(",") + 1);
+            string B = S.substr(0, S.find(','));
+            S.erase(0, S.find(',') + 1);
             if (IsNumeric(B))
             {
                 ScreenCodes[p++] = ConvertStringToInt(B);
@@ -1832,11 +1832,15 @@ bool ImportFromJson()
                 }
                 else
                 {
+                    delete[] ScreenCodes;
+
                     return true;
                 }
             }
         }
     }
+
+    delete[] ScreenCodes;
 
     return true;
 }
@@ -1854,7 +1858,7 @@ unsigned int GetPixel(size_t X, size_t Y)
     unsigned char B = Image[Pos + 2];
     unsigned char A = Image[Pos + 3];
 
-    unsigned int Col = (R * 0x1000000) + (G * 0x10000) + (B * 0100) + A;
+    unsigned int Col = (R * 0x1000000) + (G * 0x10000) + (B * 0x100) + A;
 
     return Col;
 }
@@ -2034,7 +2038,7 @@ bool DecodeBmp()
     }
 
     //Calculate data offset
-    size_t DataOffset = (size_t)ImgRaw[DATA_OFFSET] + (size_t)(ImgRaw[DATA_OFFSET + 1] * 0x100) + (size_t)(ImgRaw[DATA_OFFSET + 2] * 0x10000) + (size_t)(ImgRaw[DATA_OFFSET + 3] * 01000000);
+    size_t DataOffset = (size_t)ImgRaw[DATA_OFFSET] + (size_t)(ImgRaw[DATA_OFFSET + 1] * 0x100) + (size_t)(ImgRaw[DATA_OFFSET + 2] * 0x10000) + (size_t)(ImgRaw[DATA_OFFSET + 3] * 0x1000000);
 
     //Calculate length of pixel rows in bytes
     size_t RowLen = ((size_t)BmpInfo->bmiHeader.biWidth * (size_t)BmpInfo->bmiHeader.biBitCount) / 8;
@@ -2048,6 +2052,9 @@ bool DecodeBmp()
     if (ImgRaw.size() != CalcSize)
     {
         cerr << "***CRITICAL***\tCorrupted BMP file size.\n";
+
+        delete[] BmpInfo;
+
         return false;
     }
 
@@ -2105,6 +2112,8 @@ bool DecodeBmp()
 
     ImgWidth = BmpInfo->bmiHeader.biWidth;
     ImgHeight = BmpInfo->bmiHeader.biHeight;
+
+    delete[] BmpInfo;
 
     return true;
 }
