@@ -1735,7 +1735,7 @@ bool ImportFromJson()
         while (W.find(' ') != string::npos)
         {
             //Remove space characters if there's any
-            W.replace(W.find (" "),1,"");
+            W.replace(W.find (' '),1,"");
         }
         if ((W.length() > 0) && (IsNumeric(W)))
         {
