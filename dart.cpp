@@ -812,7 +812,7 @@ bool ImportFromD64()
             Disk[Track[18] + 0x90 + i] = DA[Track[18] + 0x90 + i];
         }
     }
-    else if (argDiskName != "")         //Otherwise, check if disk name is specified in command line
+    else if (!argDiskName.empty())         //Otherwise, check if disk name is specified in command line
     {
         for (int i = 0; i < 16; i++)
         {
@@ -827,7 +827,7 @@ bool ImportFromD64()
             Disk[Track[18] + 0xa2 + i] = DA[Track[18] + 0xa2 + i];
         }
     }
-    else if (argDiskID != "")           //Otherwise, check if disk ID is specified in command line
+    else if (!argDiskID.empty())           //Otherwise, check if disk ID is specified in command line
     {
         for (int i = 0; i < 5; i++)
         {
@@ -899,7 +899,7 @@ bool ImportFromTxt()
         }
     }
 
-    if (DirArt != "")
+    if (!DirArt.empty())
     {
         EntryIndex++;
 
@@ -1011,7 +1011,7 @@ bool AddCArrayDirEntry(int RowLen)
 
     while ((EntryStart = DirEntry.find(delimiter)) != string::npos)
     {
-        if (DirEntry.substr(0, EntryStart) != "")
+        if (!DirEntry.substr(0, EntryStart).empty())
         {
             Entry[NumEntries++] = DirEntry.substr(0, EntryStart);
         }
@@ -1024,7 +1024,7 @@ bool AddCArrayDirEntry(int RowLen)
         }
     }
 
-    if ((NumEntries < 16) && (DirEntry != ""))
+    if ((NumEntries < 16) && (!DirEntry.empty()))
     {
         for (size_t i = 0; i < DirEntry.length(); i++)
         {
@@ -1357,7 +1357,7 @@ bool AddAsmDirEntry(string AsmDirEntry)
                         while ((EntrySegments[1].find(delimiter) != string::npos) && (NumValues < 15))
                         {
                             string ThisValue = EntrySegments[1].substr(0, EntrySegments[1].find(delimiter));
-                            if (ThisValue != "")
+                            if (!ThisValue.empty())
                             {
                                 Values[NumValues++] = ThisValue;
                             }
@@ -1369,7 +1369,7 @@ bool AddAsmDirEntry(string AsmDirEntry)
 
                         for (int v = 0; v < NumValues; v++)
                         {
-                            if (Values[v] != "")
+                            if (!Values[v].empty())
                             {
                                 unsigned char NextChar = 0x20;          //SPACE default char - if conversion is not possible
                                 if (Values[v].find('$') == 0)
@@ -1480,7 +1480,7 @@ bool AddAsmDiskParameters()
         }
     }
 
-    if (DiskName != "")
+    if (!DiskName.empty())
     {
         OutFileName = DiskName;
 
@@ -1521,7 +1521,7 @@ bool AddAsmDiskParameters()
         }
     }
 
-    if (DirHeader != "")
+    if (!DirHeader.empty())
     {
         for (size_t i = 0; i < 16; i++)
         {
@@ -1529,7 +1529,7 @@ bool AddAsmDiskParameters()
             Disk[Track[18] + 0x90 + i] = Ascii2DirArt[toupper(DirHeader[i])];
         }
     }
-    else if (argDiskName != "")
+    else if (!argDiskName.empty())
     {
         for (size_t i = 0; i < 16; i++)
         {
@@ -1562,7 +1562,7 @@ bool AddAsmDiskParameters()
         }
     }
 
-    if (DirID != "")
+    if (!DirID.empty())
     {
         for (size_t i = 0; i < 5; i++)
         {
@@ -1570,7 +1570,7 @@ bool AddAsmDiskParameters()
             Disk[Track[18] + 0xa2 + i] = Ascii2DirArt[toupper(DirID[i])];
         }
     }
-    else if (argDiskID != "")
+    else if (!argDiskID.empty())
     {
         for (size_t i = 0; i < 5; i++)
         {
@@ -1620,7 +1620,7 @@ bool ImportFromAsm()
         }
     }
 
-    if ((DirArt != "") && (DirPos != 0))
+    if ((!DirArt.empty()) && (DirPos != 0))
     {
         DirEntry = DirArt;
         string EntryType = DirEntry.substr(0, DirEntry.find('['));
@@ -2610,7 +2610,7 @@ int main(int argc, char* argv[])
     {
         AppendMode = true;
     }
-    else if (argSkippedEntries != "")
+    else if (!argSkippedEntries.empty())
     {
         if (IsNumeric(argSkippedEntries))
         {
@@ -2686,7 +2686,7 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
-    if (argFirstImportedEntry != "")
+    if (!argFirstImportedEntry.empty())
     {
         if (IsNumeric(argFirstImportedEntry))
         {
@@ -2703,7 +2703,7 @@ int main(int argc, char* argv[])
         argFirstImportedEntry = "1";
     }
 
-    if (argLastImportedEntry != "")
+    if (!argLastImportedEntry.empty())
     {
         if (IsNumeric(argLastImportedEntry))
         {
@@ -2862,7 +2862,7 @@ int main(int argc, char* argv[])
     //Finally, update the directory header and ID (done separately for ASM and D64 input files)
     if ((DirArtType != "asm") && (DirArtType != "d64"))
     {
-        if (argDiskName != "")
+        if (!argDiskName.empty())
         {
             for (int i = 0; i < 16; i++)
             {
@@ -2870,7 +2870,7 @@ int main(int argc, char* argv[])
             }
         }
 
-        if (argDiskID != "")
+        if (!argDiskID.empty())
         {
             for (int i = 0; i < 5; i++)
             {
