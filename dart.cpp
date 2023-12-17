@@ -79,7 +79,7 @@ BITMAPINFOHEADER BmpInfoHeader;
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
-string ConvertIntToHextString(const int& i, const int& hexlen)
+string ConvertIntToHextString(const int i, const int hexlen)
 {
     std::stringstream hexstream;
     hexstream << setfill('0') << setw(hexlen) << hex << i;
@@ -171,14 +171,22 @@ bool WriteDiskImage(const string& DiskName)
 
     if (myFile.is_open())
     {
-        cout << "Writing " + OutFileName + "...\n";
+        cout << "Writing " + DiskName + "...\n";
         myFile.write((char*)&Disk[0], DiskSize);
+
+        if (!myFile.good())
+        {
+            cerr << "***CRITICAL***\tError during writing " << DiskName << "\n";
+            myFile.close();
+            return false;
+        }
+        
         cout << "Done!\n";
         return true;
     }
     else
     {
-        cerr << "***CRITICAL***\tError during writing disk image: " << DiskName << "\n\n";
+        cerr << "***CRITICAL***\tError oprning file for writing disk image " << DiskName << "\n\n";
         return false;
     }
 }
@@ -210,6 +218,8 @@ int ReadBinaryFile(const string& FileName, vector<unsigned char>& prg)
 
     copy(istreambuf_iterator<char>(infile), istreambuf_iterator<char>(), back_inserter(prg));
 
+    infile.close();
+
     return length;
 }
 
@@ -223,20 +233,20 @@ string ReadFileToString(const string& FileName, bool CorrectFilePath = false)
         return "";
     }
 
-    ifstream t(FileName);
+    ifstream infile(FileName);
 
-    if (t.fail())
+    if (infile.fail())
     {
         return "";
     }
 
     string str;
 
-    t.seekg(0, ios::end);
-    str.reserve(t.tellg());
-    t.seekg(0, ios::beg);
+    infile.seekg(0, ios::end);
+    str.reserve(infile.tellg());
+    infile.seekg(0, ios::beg);
 
-    str.assign((istreambuf_iterator<char>(t)), istreambuf_iterator<char>());
+    str.assign((istreambuf_iterator<char>(infile)), istreambuf_iterator<char>());
 
     for (int i = str.length() - 1; i >= 0; i--)        //Do this backwards - we may shorten the string the string
     {
@@ -249,6 +259,8 @@ string ReadFileToString(const string& FileName, bool CorrectFilePath = false)
             str.replace((size_t)i, 1, "/");     //Replace '\' with '/' in file paths, Windows can also handle this
         }
     }
+
+    infile.close();
 
     return str;
 }
@@ -864,7 +876,7 @@ bool ImportFromTxt()
 
     DirArt = ReadFileToString(InFileName);
 
-    if (DirArt == "")
+    if (DirArt.empty())
     {
         cerr << "***CRITICAL***\tUnable to open the following DirArt file: " << InFileName << "\n";
         return false;
@@ -1031,7 +1043,7 @@ bool AddCArrayDirEntry(int RowLen)
         NumEntries++;
     }
 
-    if (NumEntries == RowLen)       //Ignore rows that are too short (e.g.
+    if (NumEntries == RowLen)       //Ignore rows that are too short.
     {
         unsigned char bEntry[16]{};
         bool AllNumeric = true;
@@ -1111,7 +1123,7 @@ bool AddCArrayDirEntry(int RowLen)
                 }
                 else
                 {
-                    return true;
+                    return false;
                 }
             }
         }
@@ -1127,7 +1139,7 @@ bool ImportFromCArray() {
 
     string DA = ReadFileToString(InFileName);
 
-    if (DA == "")
+    if (DA.empty())
     {
         cerr << "***CRITICAL***\tUnable to open the following DirArt file: " << InFileName << "\n";
         return false;
@@ -1576,7 +1588,7 @@ bool ImportFromAsm()
 
     DirArt = ReadFileToString(InFileName);
 
-    if (DirArt == "")
+    if (DirArt.empty())
     {
         cerr << "***CRITICAL***\tUnable to open the following DirArt file: " << InFileName << "\n";
         return false;
@@ -1712,7 +1724,7 @@ bool ImportFromJson()
 {
     DirArt = ReadFileToString(InFileName);
 
-    if (DirArt == "")
+    if (DirArt.empty())
     {
         cerr << "***CRITICAL***\tUnable to open the following .JSON DirArt file: " << InFileName << "\n";
         return false;
@@ -2582,7 +2594,7 @@ int main(int argc, char* argv[])
         i++;
     }
     
-    if (InFileName == "")
+    if (InFileName.empty())
     {
         cerr << "***CRITICAL***\tMissing input file name!\n";
         return EXIT_FAILURE;
@@ -2740,7 +2752,7 @@ int main(int argc, char* argv[])
         DirArtType += tolower(InFileName[i]);
     }
 
-    if (OutFileName == "")
+    if (OutFileName.empty())
     {
         //Output file name not provided, use input file name without its extension to create output d64 file name
         OutFileName = InFileName.substr(0, InFileName.size() - DirArtType.size() - 1) + "_out.d64";
