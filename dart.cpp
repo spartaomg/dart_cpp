@@ -2457,8 +2457,8 @@ int main(int argc, char* argv[])
     {
 
     #ifdef DEBUG
-        InFileName = "c:/Users/Tamas/OneDrive/C64/Coding/Atlantis/Aullido/art2.c";
-        OutFileName = "c:/Users/Tamas/OneDrive/C64/Coding/Atlantis/Aullido/test.d64";
+        InFileName = "c:/dart/test/art2.c";
+        OutFileName = "c:/dart/test/test.d64";
         argSkippedEntries = "all";
         argEntryType = "del";
     #else
