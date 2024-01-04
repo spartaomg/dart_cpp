@@ -2314,7 +2314,7 @@ void ShowInfo()
 
     cout << "Usage:\n";
     cout << "------\n";
-    cout << "dart input -o [output.d64] -n [disk name] -i [disk id] -s [skipped entries] -t [default entry type]\n";
+    cout << "dart input -o [output.d64] -n [\"disk name\"] -i [\"disk id\"] -s [skipped entries] -t [default entry type]\n";
     cout << "           -f[first imported entry] - l[last imported entry]\n\n";
 
     cout << "input - the file from which the directory art will be imported. See accepted file types below.\n\n";
@@ -2383,7 +2383,7 @@ void ShowInfo()
     cout << "       instead of the default entry type defined by the -t option.\n";
     cout << "       Example:\n\n";
 
-    cout << "           .disk [filename= \"Test.d64\", name=\"test disk\", id=\"-omg-\"]\n";
+    cout << "           .disk [filename= \"Test.d64\", name=\"test disk\", id=\"-g*p-\"]\n";
     cout << "           {\n";
     cout << "               [name = \"0123456789ABCDEF\", type = \"prg\"],\n";
     cout << "               [name = @\"\\$75\\$69\\$75\\$69\\$B2\\$69\\$75\\$69\\$75\\$ae\\$B2\\$75\\$AE\\$20\\$20\\$20\", type=\"del\"],\n";
@@ -2420,7 +2420,7 @@ void ShowInfo()
     cout << "Example 2:\n";
     cout << "----------\n\n";
 
-    cout << "dart MyDirArt.c -o MyDemo.d64 -n \"demo 2023\" -i \"-omg-\"\n\n";
+    cout << "dart MyDirArt.c -o MyDemo.d64 -n \"demo 2023\" -i \"-g*p-\"\n\n";
 
     cout << "DART will import the DirArt from a Marq's PETSCII Editor C array file into MyDemo.d64 overwriting all existing\n";
     cout << "directory entries, using del as entry type, and it will update the disk name and ID in MyDemo.d64.\n\n";
@@ -2440,7 +2440,7 @@ void ShowInfo()
 
     cout << "DART will first import the DirArt from a PNG image file into MyDemo.d64 overwriting all directory entries except\n";
     cout << "the first one, using prg as entry type. Then DART will append entries 3-7 from the second PNG file to the directory\n";
-    cout << "of MyDemo.d64 (keeping all already existing entries in it), using del as entry type.\n";
+    cout << "of MyDemo.d64 (keeping all already existing entries in it), using del as (default) entry type.\n";
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
@@ -2449,7 +2449,7 @@ int main(int argc, char* argv[])
 {
     cout << "\n";
     cout << "*********************************************************\n";
-    cout << "DART 1.3 - Directory Art Importer by Sparta (C) 2022-2023\n";
+    cout << "DART 1.3 - Directory Art Importer by Sparta (C) 2022-2024\n";
     cout << "*********************************************************\n";
     cout << "\n";
 
