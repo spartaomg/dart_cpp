@@ -2466,7 +2466,7 @@ int main(int argc, char* argv[])
         cout << "options:    -o [output.d64]\n";
         cout << "            -n [\"disk name\"]\n";
         cout << "            -i [\"disk id\"]\n";
-        cout << "            -s [skipped entries in output.64]\n";
+        cout << "            -s [skipped entries in output.d64]\n";
         cout << "            -t [default entry type]\n";
         cout << "            -f [first imported entry]\n";
         cout << "            -l [last imported entry]\n\n";
