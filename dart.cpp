@@ -2315,7 +2315,7 @@ void ShowInfo()
     cout << "Usage:\n";
     cout << "------\n";
     cout << "dart input -o [output.d64] -n [\"disk name\"] -i [\"disk id\"] -s [skipped entries] -t [default entry type]\n";
-    cout << "           -f[first imported entry] - l[last imported entry]\n\n";
+    cout << "           -f [first imported entry] - l [last imported entry]\n\n";
 
     cout << "input - the file from which the directory art will be imported. See accepted file types below.\n\n";
 
