@@ -2470,7 +2470,7 @@ int main(int argc, char* argv[])
         cout << "            -t [default entry type]\n";
         cout << "            -f [first imported entry]\n";
         cout << "            -l [last imported entry]\n\n";
-        cout << "Help:  dart -?\n";
+        cout << "Help:  dart -h\n";
         return EXIT_SUCCESS;
     #endif
 
@@ -2600,7 +2600,7 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
-    if (InFileName == "-?")
+    if (InFileName == "-h")
     {
         ShowInfo();
         return EXIT_SUCCESS;
