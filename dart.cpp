@@ -8,6 +8,8 @@ const int ExtDiskSize = StdDiskSize + (85 * 256);
 
 const int NumSectorsTrack18 = 19;
 
+int NumFreeEntries = 0;
+
 vector <unsigned char> Disk;
 vector <unsigned char> Image;   //pixels in RGBA format (4 bytes per pixel)
 vector <unsigned char> ImgRaw;
@@ -32,6 +34,7 @@ int EntryIndex = 0;             //Index of current entry, will be compared to Fi
 string DirEntry = "";
 string DirArt = "";
 string DirArtType = "";
+string OutputType = "";
 
 bool DirEntryAdded = false;
 bool AppendMode = false;
@@ -137,6 +140,36 @@ bool CreateDirectory(const string& DiskDir)
         return false;
     }
     return true;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+bool WriteBinaryFile()
+{
+
+    ofstream myFile(OutFileName + ".bin", ios::out | ios::binary);
+
+    if (myFile.is_open())
+    {
+        cout << "Writing " + OutFileName + ".bin" + "...\n";
+        myFile.write((char*)&Image[0], ImgWidth * ImgHeight * 4);
+
+        if (!myFile.good())
+        {
+            cerr << "***CRITICAL***\tError during writing " << OutFileName << "\n";
+            myFile.close();
+            return false;
+        }
+
+        cout << "Done!\n";
+        return true;
+    }
+    else
+    {
+        cerr << "***CRITICAL***\tError oprning file for writing disk image " << OutFileName << "\n\n";
+        return false;
+    }
+
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
@@ -264,6 +297,291 @@ string ReadFileToString(const string& FileName, bool CorrectFilePath = false)
 
     return str;
 }
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+void SetPixel(size_t X, size_t Y, unsigned int Col)
+{
+    size_t Pos = Y * ((size_t)ImgWidth * 4) + (X * 4);
+
+    unsigned char R = (Col >> 16) & 0xff;
+    unsigned char G = (Col >> 8) & 0xff;
+    unsigned char B = Col & 0xff;
+    unsigned char A = 255;
+
+    Image[Pos + 0] = R;
+    Image[Pos + 1] = G;
+    Image[Pos + 2] = B;
+    Image[Pos + 3] = A;
+
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+void DrawChar(unsigned char PChar, int ImgX, int ImgY, unsigned int Color)
+{
+
+    unsigned int px = PChar % 16;
+    unsigned int py = PChar / 16;
+
+    for (int y = 0; y < 8; y++)
+    {
+        for (int x = 0; x < 8; x++)
+        {
+            unsigned int CharSetPos = (py * 8 * 128) + (y * 128) + (px * 8) + x;
+
+            if (CharSetTab[CharSetPos] == 1)
+            {
+                int PixelX = ImgX + x;
+                int PixelY = ImgY + y;
+                SetPixel(PixelX, PixelY, Color);
+            }
+        }//Next x
+    }//Next y
+
+}
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+bool ConvertD64ToPng()
+{
+    unsigned char DirArtToPetscii[256]{};
+    
+    for (int i = 0; i < 256; i++)
+    {
+        DirArtToPetscii[i] = 0x20;;
+    }
+
+    for (int i = 0; i < 256; i++)
+    {
+        unsigned char c = Petscii2DirArt[i];
+        if (c != 0x20)
+        {
+            DirArtToPetscii[c] = i;
+        }
+    }
+
+    int UsedEntries = 144 - NumFreeEntries;
+
+    ImgWidth = 384;
+    ImgHeight = UsedEntries > 24 ? (UsedEntries * 8) + 8 + 72 : 272;
+
+    Image.resize((size_t)ImgWidth * ImgHeight * 4);
+
+    unsigned int BorderColor = 0x7c70da;    //light blue
+    unsigned int BkgColor = 0x3e31a2;       //dark blue
+    unsigned int ForeColor = 0x7c70da;      //light blue
+
+    int R0 = (BorderColor >> 16) & 0xff;
+    int G0 = (BorderColor >> 8) & 0xff;
+    int B0 = BorderColor & 0xff;
+
+    int R1 = (BkgColor >> 16) & 0xff;
+    int G1 = (BkgColor >> 8) & 0xff;
+    int B1 = BkgColor & 0xff;
+
+    for (size_t y = 0; y < (size_t)ImgHeight; y++)
+    {
+        for (size_t x = 0; x < (size_t)ImgWidth; x++)
+        {
+            size_t Pos = y * ((size_t)ImgWidth * 4) + (x * 4);
+
+            if ((y < 35) || (y > (size_t)ImgHeight-37)|| (x < 32) || (x > (size_t)ImgWidth-32))
+            {
+                Image[Pos + 0] = R0;
+                Image[Pos + 1] = G0;
+                Image[Pos + 2] = B0;
+            }
+            else
+            {
+                Image[Pos + 0] = R1;
+                Image[Pos + 1] = G1;
+                Image[Pos + 2] = B1;
+            }
+            Image[Pos + 3] = 255;
+        }
+    }
+
+    int ImgX = 32;
+    int ImgY = 35;
+
+    unsigned int B = 0;
+    DrawChar(0x30, ImgX, ImgY, ForeColor);
+
+    DrawChar(0xa2, 32 + 0x10, ImgY, ForeColor);
+    DrawChar(0xa2, 32 + 0x98, ImgY, ForeColor);
+    DrawChar(0xa0, 32 + 0xa0, ImgY, ForeColor);
+
+    for (int i = 0; i < 16; i++)
+    {
+        B = Disk[Track[DirTrack] + 0x90 + i];
+        if ((B >= 0x41) && (B < +0x5a))
+        {
+            B -= 0x40;
+        }
+        B |= 0x80;
+        DrawChar(B, ImgX + 0x18 + (i * 8), ImgY, ForeColor);
+    }
+
+    for (int i = 0; i < 5; i++)
+    {
+        B = Disk[Track[DirTrack] + 0xa2 + i];
+        if ((B >= 0x41) && (B < +0x5a))
+        {
+            B -= 0x40;
+        }
+        B |= 0x80;
+        DrawChar(B, ImgX + 0xa8 + (i * 8), ImgY, ForeColor);
+    }
+
+    ImgY += 8;
+
+    DirTrack = 18;
+    DirSector = 1;
+    DirPos = 2;
+
+    while (DirPos != 0)
+    {
+        if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos] != 0)
+        {
+
+            unsigned char ET = Disk[Track[DirTrack] + (DirSector * 256) + DirPos];
+            string EntryType = "";
+            if (ET == 0x01)
+            {
+                EntryType = "*SEQ";
+            }
+            else if (ET == 0x02)
+            {
+                EntryType = "*PRG";
+            }
+            else if (ET == 0x03)
+            {
+                EntryType = "*USR";
+            }
+            else if (ET == 0x80)
+            {
+                EntryType = " DEL";
+            }
+            else if (ET == 0x81)
+            {
+                EntryType = " SEQ";
+            }
+            else if (ET == 0x82)
+            {
+                EntryType = " PRG";
+            }
+            else if (ET == 0x83)
+            {
+                EntryType = " USR";
+            }
+            else if (ET == 0x84)
+            {
+                EntryType = " REL";
+            }
+            else if (ET == 0xc0)
+            {
+                EntryType = " DEL<";
+            }
+            else if (ET == 0xc1)
+            {
+                EntryType = " SEQ<";
+            }
+            else if (ET == 0xc2)
+            {
+                EntryType = " PRG<";
+            }
+            else if (ET == 0xc3)
+            {
+                EntryType = " USR<";
+            }
+            else if (ET == 0xc4)
+            {
+                EntryType = " REL<";
+            }
+
+            for (size_t i = 0; i < EntryType.length(); i++)
+            {
+                B = EntryType[i];
+                if ((B >= 0x41) && (B <= 0x5a))
+                {
+                    B -= 0x40;
+                }
+                DrawChar(B, 32 + 48 + 128 + 8 + (i * 8), ImgY, ForeColor);
+            }
+
+            int BlockCnt = Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 28] + (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 29] * 256);
+
+            if (BlockCnt > 9999)
+            {
+                B = (BlockCnt / 10000) + 0x30;
+                DrawChar(B, ImgX, ImgY, ForeColor);
+                ImgX += 8;
+            }
+            if (BlockCnt > 999)
+            {
+                B = ((BlockCnt / 1000) % 10) + 0x30;
+                DrawChar(B, ImgX, ImgY, ForeColor);
+                ImgX += 8;
+            }
+            if (BlockCnt > 99)
+            {
+                B = ((BlockCnt / 100) % 10) + 0x30;
+                DrawChar(B, ImgX, ImgY, ForeColor);
+                ImgX += 8;
+            }
+            if (BlockCnt > 9)
+            {
+                B = ((BlockCnt / 10) % 10) + 0x30;
+                DrawChar(B, ImgX, ImgY, ForeColor);
+                ImgX += 8;
+            }
+
+            B = (BlockCnt % 10) + 0x30;
+            DrawChar(B, ImgX, ImgY, ForeColor);
+                
+            DrawChar(0x22, 32+40, ImgY, ForeColor);
+            DrawChar(0x22, 32+48+128, ImgY, ForeColor);
+            
+            ImgX = 32 + 48;
+
+            for (int i = 0; i < 16; i++)
+            {
+                unsigned int NextChar = Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i];
+                unsigned char PChar = DirArtToPetscii[NextChar];
+                DrawChar(PChar, ImgX, ImgY, ForeColor);
+                ImgX += 8;
+            }
+            ImgX = 32;
+            ImgY += 8;
+        }
+        DirPos += 32;
+        if (DirPos > 256)
+        {
+            DirPos -= 256;
+            int NT = Disk[Track[DirTrack] + (DirSector * 256) + 0];
+            int NS = Disk[Track[DirTrack] + (DirSector * 256) + 1];
+            DirTrack = NT;
+            DirSector = NS;
+
+            if (DirTrack == 0)
+            {
+                DirPos = 0;
+            }
+        }
+    }
+
+    unsigned int error = lodepng::encode(OutFileName, Image, ImgWidth, ImgHeight);
+
+    if (error)
+    {
+        cout << "Error during encoding and saving PNG.\n";
+        return false;
+    }
+
+    return true;
+
+}
+
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -699,21 +1017,27 @@ void FixSparkleBAM()
 
 bool OpenOutFile()
 {
-
-    DiskSize = ReadBinaryFile(OutFileName, Disk);   //Load the output file if it exists
-
-    if (DiskSize < 0)
+    if (OutputType == "png")
     {
-        //Output file doesn't exits, create an empty D64
-        CreateDisk();
+        CreateDisk();           //PNG output - creating a virtual D64 first from the input file which will then be converted to PNG
     }
-    else if ((DiskSize != StdDiskSize) && (DiskSize != ExtDiskSize))    //Otherwise make sure the output disk is the correct size
+    else
     {
-        cerr << "***CRITICAL***\t Invalid output disk file size!\n";
-        return false;
-    }
+        DiskSize = ReadBinaryFile(OutFileName, Disk);   //Load the output file if it exists
 
-    FixSparkleBAM();        //Earlier Sparkle versions didn't mark DirArt and internal directory sectors off in the BAM
+        if (DiskSize < 0)
+        {
+            //Output file doesn't exits, create an empty D64
+            CreateDisk();
+        }
+        else if ((DiskSize != StdDiskSize) && (DiskSize != ExtDiskSize))    //Otherwise make sure the output disk is the correct size
+        {
+            cerr << "***CRITICAL***\t Invalid output disk file size!\n";
+            return false;
+        }
+
+        FixSparkleBAM();        //Earlier Sparkle versions didn't mark DirArt and internal directory sectors off in the BAM
+    }
 
     DirTrack = 18;
     DirSector = 1;
@@ -2314,14 +2638,17 @@ void ShowInfo()
 
     cout << "Usage:\n";
     cout << "------\n";
-    cout << "dart input -o [output.d64] -n [\"disk name\"] -i [\"disk id\"] -s [skipped entries] -t [default entry type]\n";
+    cout << "dart input -o [output.d64 or output.png] -n [\"disk name\"] -i [\"disk id\"] -s [skipped entries] -t [default entry type]\n";
     cout << "           -f [first imported entry] - l [last imported entry]\n\n";
 
     cout << "input - the file from which the directory art will be imported. See accepted file types below.\n\n";
 
     cout << "-o [output.d64] - the D64 file to which the directory art will be imported. This parameter is optional and it will be\n";
     cout << "       ignored if it is used with KickAss ASM input files that include the 'filename' disk parameter. If an output\n";
-    cout << "       D64 name is not specified, DART will create an input_out.d64 file.\n\n";
+    cout << "       D64 name is not specified, DART will create an input_out.d64 file. If the output file is a PNG then instead of a\n";
+    cout << "       D64 file, DART will create a PNG \"screenshot\" of the directory listing. If there are less than 25 entries then\n";
+    cout << "       the ouput PNG's size will be 384 x 272 pixels. If there are more than 24 entries than the width will be 384 pixels\n";
+    cout << "       and the height will be ((entires + 1) * 8) + 72 pixels.\n\n";
 
     cout << "-n [\"disk name\"] - the output D64's disk name (left side of the topmost inverted row of the directory listing), max.\n";
     cout << "       16 characters. Wrap text in double quotes. This parameter is optional and it will be ignored if it is used\n";
@@ -2449,7 +2776,7 @@ int main(int argc, char* argv[])
 {
     cout << "\n";
     cout << "*********************************************************\n";
-    cout << "DART 1.3 - Directory Art Importer by Sparta (C) 2022-2024\n";
+    cout << "DART 1.4 - Directory Art Importer by Sparta (C) 2022-2024\n";
     cout << "*********************************************************\n";
     cout << "\n";
 
@@ -2457,19 +2784,19 @@ int main(int argc, char* argv[])
     {
 
     #ifdef DEBUG
-        InFileName = "c:/dart/test/art2.c";
-        OutFileName = "c:/dart/test/test.d64";
+        InFileName = "c:/dart/test/Propaganda34.d64";
+        OutFileName = "c:/dart/test/d64test.png";
         argSkippedEntries = "all";
         argEntryType = "del";
     #else
         cout << "Usage: dart input [options]\n";
-        cout << "options:    -o [output.d64]\n";
-        cout << "            -n [\"disk name\"]\n";
-        cout << "            -i [\"disk id\"]\n";
-        cout << "            -s [skipped entries in output.d64]\n";
-        cout << "            -t [default entry type]\n";
-        cout << "            -f [first imported entry]\n";
-        cout << "            -l [last imported entry]\n\n";
+        cout << "options:    -o <output.d64> or <output.png>\n";
+        cout << "            -n <\"disk name\">\n";
+        cout << "            -i <\"disk id\">\n";
+        cout << "            -s <skipped entries in output.d64>\n";
+        cout << "            -t <default entry type>\n";
+        cout << "            -f <first imported entry>\n";
+        cout << "            -l <last imported entry>\n\n";
         cout << "Help:  dart -h\n";
         return EXIT_SUCCESS;
     #endif
@@ -2758,8 +3085,32 @@ int main(int argc, char* argv[])
         OutFileName = InFileName.substr(0, InFileName.size() - DirArtType.size() - 1) + "_out.d64";
     }
 
-    if (!OpenOutFile())
-        return EXIT_FAILURE;
+    for (int i = OutFileName.length() - 1; i >= 0; i--)
+    {
+        if (OutFileName[i] == '/')
+        {
+            //We've reached a path separator before a "." -> no extension
+            break;
+        }
+        else if (OutFileName[i] == '.')
+        {
+            ExtStart = i + 1;
+            break;
+        }
+    }
+
+    for (size_t i = ExtStart; i < OutFileName.length(); i++)
+    {
+        OutputType += tolower(OutFileName[i]);
+    }
+
+    //if (OutputType == "d64")
+    //{
+        if (!OpenOutFile())
+        {
+            return EXIT_FAILURE;
+        }
+    //}
 
     string Msg = "";
 
@@ -2879,19 +3230,29 @@ int main(int argc, char* argv[])
         }
     }
 
-    if (!WriteDiskImage(OutFileName))
-    {
-        return EXIT_FAILURE;
-    }
-
     int NumFreeSectors = Disk[Track[DirTrack] + (size_t)(18 * 4)];
-    int NumFreeEntries = NumFreeSectors * 8;
+    NumFreeEntries = NumFreeSectors * 8;
 
     if (DirPos != 0)
     {
         for (int i = DirPos + 32; i < 256; i += 32)
         {
             NumFreeEntries++;
+        }
+    }
+
+    if (OutputType == "d64")
+    {
+        if (!WriteDiskImage(OutFileName))
+        {
+            return EXIT_FAILURE;
+        }
+    }
+    else if (OutputType == "png")
+    {
+        if (!ConvertD64ToPng())
+        {
+            return EXIT_FAILURE;
         }
     }
 
