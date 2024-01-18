@@ -341,19 +341,56 @@ void DrawChar(unsigned char PChar, int ImgX, int ImgY, unsigned int Color)
     }//Next y
 
 }
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+int CalcNumEntries()
+{
+    DirTrack = 18;
+    DirSector = 1;
+    DirPos = 2;
+    int NE = 0;
+
+    while (DirPos != 0)
+    {
+        if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos] != 0)
+        {
+            NE++;
+        }
+        DirPos += 32;
+        if (DirPos > 256)
+        {
+            DirPos -= 256;
+            int NT = Disk[Track[DirTrack] + (DirSector * 256) + 0];
+            int NS = Disk[Track[DirTrack] + (DirSector * 256) + 1];
+            DirTrack = NT;
+            DirSector = NS;
+
+            if (DirTrack == 0)
+            {
+                DirPos = 0;
+            }
+        }
+    }
+
+    return NE;
+}
+
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
 bool ConvertD64ToPng()
 {
+#ifdef DEBUG
+    WriteDiskImage(OutFileName + ".d64");
+#endif
 
-    int UsedEntries = 144 - NumFreeEntries;
-
+    int NumEntries = CalcNumEntries();
     ImgWidth = 384;
     
 #ifdef AddBlockCount
-    ImgHeight = UsedEntries > 22 ? (UsedEntries * 8) + 24 + 72 : 272;
+    ImgHeight = NumEntries > 22 ? (NumEntries * 8) + 24 + 72 : 272;
 #elif
-    ImgHeight = UsedEntries > 24 ? (UsedEntries * 8) + 8 + 72 : 272;
+    ImgHeight = NumEntries > 24 ? (NumEntries * 8) + 8 + 72 : 272;
 #endif
 
     Image.resize((size_t)ImgWidth * ImgHeight * 4);
@@ -392,6 +429,10 @@ bool ConvertD64ToPng()
         }
     }
 
+    DirTrack = 18;
+    DirSector = 1;
+    DirPos = 2;
+
     int ImgX = 32;
     int ImgY = 35;
 
@@ -405,22 +446,14 @@ bool ConvertD64ToPng()
     for (int i = 0; i < 16; i++)
     {
         B = Disk[Track[DirTrack] + 0x90 + i];
-        if ((B >= 0x41) && (B < +0x5a))
-        {
-            B -= 0x40;
-        }
-        B |= 0x80;
+        B = Char2Petscii[B] | 0x80;
         DrawChar(B, ImgX + 0x18 + (i * 8), ImgY, ForeColor);
     }
 
     for (int i = 0; i < 5; i++)
     {
         B = Disk[Track[DirTrack] + 0xa2 + i];
-        if ((B >= 0x41) && (B < +0x5a))
-        {
-            B -= 0x40;
-        }
-        B |= 0x80;
+        B = Char2Petscii[B] | 0x80;
         DrawChar(B, ImgX + 0xa8 + (i * 8), ImgY, ForeColor);
     }
 
@@ -493,10 +526,7 @@ bool ConvertD64ToPng()
             for (size_t i = 0; i < EntryType.length(); i++)
             {
                 B = EntryType[i];
-                if ((B >= 0x41) && (B <= 0x5a))
-                {
-                    B -= 0x40;
-                }
+                B = Char2Petscii[B];
                 DrawChar(B, (size_t)32 + 48 + 128 + 8 + (i * 8), ImgY, ForeColor);
             }
 
@@ -1171,14 +1201,14 @@ bool ImportFromD64()
         S = DA[DAPtr + 1];
     }
 
-    if (DA[Track[18] + 0x90] != 0xa0)   //Import directory header only if one exists in input disk image
+    if (DA[Track[18] + 0x90] != 0xa0)       //Import directory header only if one exists in input disk image
     {
         for (int i = 0; i < 16; i++)
         {
             Disk[Track[18] + 0x90 + i] = DA[Track[18] + 0x90 + i];
         }
     }
-    else if (!argDiskName.empty())         //Otherwise, check if disk name is specified in command line
+    else if (!argDiskName.empty())          //Otherwise, check if disk name is specified in command line
     {
         for (int i = 0; i < 16; i++)
         {
@@ -1186,14 +1216,14 @@ bool ImportFromD64()
         }
     }
 
-    if (DA[Track[18] + 0xa2] != 0xa0)    //Import directory ID only if one exists in input disk image
+    if (DA[Track[18] + 0xa2] != 0xa0)       //Import directory ID only if one exists in input disk image
     {
         for (int i = 0; i < 5; i++)
         {
             Disk[Track[18] + 0xa2 + i] = DA[Track[18] + 0xa2 + i];
         }
     }
-    else if (!argDiskID.empty())           //Otherwise, check if disk ID is specified in command line
+    else if (!argDiskID.empty())            //Otherwise, check if disk ID is specified in command line
     {
         for (int i = 0; i < 5; i++)
         {
@@ -1201,6 +1231,13 @@ bool ImportFromD64()
         }
     }
 
+    if (OutputType == "png")                //Copy BAM if the output is PNG
+    {
+        for (int i = 4; i < 144; i++)
+        {
+            Disk[Track[18] + i] = DA[Track[18] + i];
+        }
+    }
     return true;
 }
 
@@ -2827,8 +2864,8 @@ int main(int argc, char* argv[])
     {
 
     #ifdef DEBUG
-        InFileName = "c:/dart/test/Propaganda34.d64";
-        OutFileName = "c:/dart/test/d64test.png";
+        InFileName = "c:/dart/test/MM1.d64";
+        OutFileName = "c:/dart/test/MM1.png";
         argSkippedEntries = "all";
         argEntryType = "del";
     #else
