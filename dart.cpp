@@ -376,7 +376,7 @@ bool ConvertD64ToPng()
         {
             size_t Pos = y * ((size_t)ImgWidth * 4) + (x * 4);
 
-            if ((y < 35) || (y > (size_t)ImgHeight-37)|| (x < 32) || (x > (size_t)ImgWidth-32))
+            if ((y < 35) || (y >= (size_t)ImgHeight - 37)|| (x < 32) || (x >= (size_t)ImgWidth - 32))
             {
                 Image[Pos + 0] = R0;
                 Image[Pos + 1] = G0;
