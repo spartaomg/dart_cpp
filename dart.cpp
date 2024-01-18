@@ -789,6 +789,7 @@ void FindNextDirPos() {
             }
         }
     }
+    
     if (DirSector != 0)
     {
         MarkSectorAsUsed(DirTrack, DirSector);
@@ -2679,18 +2680,19 @@ void ShowInfo()
 
     cout << "Usage:\n";
     cout << "------\n";
-    cout << "dart input -o [output.d64 or output.png] -n [\"disk name\"] -i [\"disk id\"] -s [skipped entries] -t [default entry type]\n";
+    cout << "dart input -o [output.d64/output.png] -n [\"disk name\"] -i [\"disk id\"] -s [skipped entries] -t [default entry type]\n";
     cout << "           -f [first imported entry] - l [last imported entry]\n\n";
 
     cout << "input - the file from which the directory art will be imported. See accepted file types below.\n\n";
 
-    cout << "-o [output.d64] - the D64 file to which the directory art will be imported. This parameter is optional and it will be\n";
-    cout << "       ignored if it is used with KickAss ASM input files that include the 'filename' disk parameter. If an output\n";
-    cout << "       D64 name is not specified, DART will create an input_out.d64 file. If the output file is a PNG then instead of a\n";
-    cout << "       D64 file, DART will create a PNG \"screenshot\" of the directory listing. If there are less than 25 entries then\n";
-    cout << "       the ouput PNG's size will be 384 x 272 pixels. If there are more than 24 entries than the width will be 384 pixels\n";
-    cout << "       and the height will be ((entires + 1) * 8) + 72 pixels.\n\n";
-
+    cout << "-o [output.d64/output.png] - the D64/PNG file to which the directory art will be imported. This parameter is optional\n";
+    cout << "       and it will be ignored if it is used with KickAss ASM input files that include the 'filename' disk parameter.\n";
+    cout << "       If an output is not specified then DART will create an input_out.d64 file. If the output file is a PNG then\n";
+    cout << "       DART will create a PNG \"screenshot\" of the directory listing instead of a D64 file. If there are less than 23\n";
+    cout << "       entries then the ouput PNG's size will be 384 x 272 pixels (same as a VICE screenshot). If there are at least\n";
+    cout << "       23 entries then the width will be 384 pixels and the height will be ((n + 3) * 8) + 72 pixels. The -s option\n";
+    cout << "       will be ignored if the output is PNG (you can't append entries to an existing PNG).\n\n";
+        
     cout << "-n [\"disk name\"] - the output D64's disk name (left side of the topmost inverted row of the directory listing), max.\n";
     cout << "       16 characters. Wrap text in double quotes. This parameter is optional and it will be ignored if it is used\n";
     cout << "       with D64 and ASM files that contain this information.\n\n";
