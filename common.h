@@ -29,3 +29,5 @@ extern const int PixelCntTab_size;
 extern unsigned char PixelCntTab[];
 extern const int CharSetTab_size;
 extern unsigned char CharSetTab[];
+extern const int Char2Petscii_size;
+extern unsigned char Char2Petscii[];

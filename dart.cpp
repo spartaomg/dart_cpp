@@ -1,5 +1,6 @@
 
 //#define DEBUG
+#define AddBlockCount
 
 #include "common.h"
 
@@ -152,7 +153,7 @@ bool WriteBinaryFile()
     if (myFile.is_open())
     {
         cout << "Writing " + OutFileName + ".bin" + "...\n";
-        myFile.write((char*)&Image[0], ImgWidth * ImgHeight * 4);
+        myFile.write((char*)&Image[0], (size_t)ImgWidth * ImgHeight * 4);
 
         if (!myFile.good())
         {
@@ -344,26 +345,16 @@ void DrawChar(unsigned char PChar, int ImgX, int ImgY, unsigned int Color)
 
 bool ConvertD64ToPng()
 {
-    unsigned char DirArtToPetscii[256]{};
-    
-    for (int i = 0; i < 256; i++)
-    {
-        DirArtToPetscii[i] = 0x20;;
-    }
-
-    for (int i = 0; i < 256; i++)
-    {
-        unsigned char c = Petscii2DirArt[i];
-        if (c != 0x20)
-        {
-            DirArtToPetscii[c] = i;
-        }
-    }
 
     int UsedEntries = 144 - NumFreeEntries;
 
     ImgWidth = 384;
+    
+#ifdef AddBlockCount
+    ImgHeight = UsedEntries > 22 ? (UsedEntries * 8) + 24 + 72 : 272;
+#elif
     ImgHeight = UsedEntries > 24 ? (UsedEntries * 8) + 8 + 72 : 272;
+#endif
 
     Image.resize((size_t)ImgWidth * ImgHeight * 4);
 
@@ -506,7 +497,7 @@ bool ConvertD64ToPng()
                 {
                     B -= 0x40;
                 }
-                DrawChar(B, 32 + 48 + 128 + 8 + (i * 8), ImgY, ForeColor);
+                DrawChar(B, (size_t)32 + 48 + 128 + 8 + (i * 8), ImgY, ForeColor);
             }
 
             int BlockCnt = Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 28] + (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 29] * 256);
@@ -547,7 +538,7 @@ bool ConvertD64ToPng()
             for (int i = 0; i < 16; i++)
             {
                 unsigned int NextChar = Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i];
-                unsigned char PChar = DirArtToPetscii[NextChar];
+                unsigned char PChar = Char2Petscii[NextChar];
                 DrawChar(PChar, ImgX, ImgY, ForeColor);
                 ImgX += 8;
             }
@@ -569,6 +560,56 @@ bool ConvertD64ToPng()
             }
         }
     }
+
+#ifdef AddBlockCount
+    int NumBlocksFree = 0;
+    DirTrack = 18;
+    for (size_t i = 1; i < 36; i++)
+    {
+        if (i != 18)        //Skip track 18
+        {
+            NumBlocksFree += Disk[Track[DirTrack] + (i * 4)];
+        }
+    }
+    if (NumBlocksFree > 99)
+    {
+        B = ((NumBlocksFree / 100) % 10) + 0x30;
+        DrawChar(B, ImgX, ImgY, ForeColor);
+        ImgX += 8;
+    }
+    if (NumBlocksFree > 9)
+    {
+        B = ((NumBlocksFree / 10) % 10) + 0x30;
+        DrawChar(B, ImgX, ImgY, ForeColor);
+        ImgX += 8;
+    }
+
+    B = (NumBlocksFree % 10) + 0x30;
+    DrawChar(B, ImgX, ImgY, ForeColor);
+    ImgX += 16;
+    
+    string BlocksFreeMsg = "BLOCKS FREE.";
+
+    for (size_t i = 0; i < BlocksFreeMsg.length(); i++)
+    {
+        B = Char2Petscii[(size_t)BlocksFreeMsg[i]];
+        DrawChar(B, ImgX, ImgY, ForeColor);
+        ImgX += 8;
+    }
+    ImgX = 32;
+    ImgY += 8;
+
+    string ReadyMsg = "READY.";
+
+    for (size_t i = 0; i < ReadyMsg.length(); i++)
+    {
+        B = Char2Petscii[(size_t)ReadyMsg[i]];
+        DrawChar(B, ImgX, ImgY, ForeColor);
+        ImgX += 8;
+    }
+#endif
+
+
 
     unsigned int error = lodepng::encode(OutFileName, Image, ImgWidth, ImgHeight);
 

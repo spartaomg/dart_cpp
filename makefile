@@ -30,7 +30,7 @@ create_dir = @"mkdir" -p $(@D)
 
 CFLAGS = -O3 -Wall -std=c++17 -fexceptions -c #-m32
 RESFLAGS = -J rc -O coff -i
-OBJ = $(DIR_OBJ)/ascii2dirart.o $(DIR_OBJ)/charsettab.o $(DIR_OBJ)/dart.o $(DIR_OBJ)/petscii2dirart.o $(DIR_OBJ)/pixelcnttab.o $(DIR_OBJ)/thirdparty/lodepng.o
+OBJ = $(DIR_OBJ)/ascii2dirart.o $(DIR_OBJ)/charsettab.o $(DIR_OBJ)/char2petscii.o $(DIR_OBJ)/dart.o $(DIR_OBJ)/petscii2dirart.o $(DIR_OBJ)/pixelcnttab.o $(DIR_OBJ)/thirdparty/lodepng.o
 
 ifeq ($(OS),Windows_NT)
 	OBJ += $(DIR_OBJ)/dart.res
