@@ -135,6 +135,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="ascii2dirart.cpp" />
+    <ClCompile Include="c64palettes.cpp" />
     <ClCompile Include="char2petscii.cpp" />
     <ClCompile Include="charsettab.cpp" />
     <ClCompile Include="dart.cpp" />

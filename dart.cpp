@@ -8,12 +8,15 @@ const int StdDiskSize = (664 + 19) * 256;
 const int ExtDiskSize = StdDiskSize + (85 * 256);
 
 const int NumSectorsTrack18 = 19;
+int NumSectorsOnTrack = NumSectorsTrack18;
 
 int NumFreeEntries = 0;
 
 vector <unsigned char> Disk;
 vector <unsigned char> Image;   //pixels in RGBA format (4 bytes per pixel)
 vector <unsigned char> ImgRaw;
+vector <unsigned char> ScrRam;
+vector <unsigned char> ColRam;
 
 //command line parameters
 string InFileName = "";
@@ -24,6 +27,7 @@ string argFirstImportedEntry = "";
 string argLastImportedEntry = "";
 string argDiskName = "";
 string argDiskID = "";
+string argPalette = "16";
 
 unsigned char FileType = 0x80;  //Default file type is DEL
 int NumSkippedEntries = 0;      //We are overwriting the whole directory by default
@@ -49,8 +53,75 @@ unsigned int ImgHeight = 0;
 unsigned int BGCol = 0;
 unsigned int FGCol = 0;
 
-size_t DirTrack{}, DirSector{}, LastDirSector{};
+int PaletteIdx = 16;
+
+                        //Pixcen colors
+
+int ColorBlack = 0;     // 0x00000000;
+int ColorWhite = 1;     // 0x00ffffff;
+int ColorRed = 2;       // 0x00894036;
+int ColorCyan = 3;      // 0x007abfc7;
+int ColorPurple = 4;    // 0x008a46ae;
+int ColorGreen = 5;     // 0x0068a941;
+int ColorBlue = 6;      // 0x003e31a2;
+int ColorYellow = 7;    // 0x00d0dc71;
+int ColorOrange = 8;    // 0x00905f25;
+int ColorBrown = 9;     // 0x005c4700;
+int ColorPink = 10;     // 0x00bb776d;;
+int ColorDkGrey = 11;   // 0x00555555;
+int ColorMdGrey = 12;   // 0x00808080;
+int ColorLtGreen = 13;  // 0x00acea88;
+int ColorLtBlue = 14;   // 0x007c70da;
+int ColorLtGrey = 15;   // 0x00ababab;
+
+string C64PaletteNames[23] {
+"00 (C64HQ)",
+"01 (C64S)",
+"02 (CCS64)",
+"03 (ChristopherJam)",
+"04 (Colodore)",
+"05 (Community Colors)",
+"06 (Deekay)",
+"07 (Frodo)",
+"08 (Godot)",
+"09 (PALette)",
+"10 (PALette 6569R1)",
+"11 (PALette 6569R5)",
+"12 (PALette 8565R2)",
+"13 (PC64)",
+"14 (Pepto NTSC Sony)",
+"15 (Pepto NTSC)",
+"16 (Pepto PAL)",
+"17 (Pepto PAL old)",
+"18 (Pixcen)",
+"19 (Ptoing)",
+"20 (RGB)",
+"21 (VICE 3.8 Original)",
+"22 (VICE 3.8 Internal)"
+};
+
+unsigned int BkgColor = 0;  // ColorBlue;       //dark blue
+//unsigned int ForeColor = ColorLtBlue;      //light blue
+
+size_t DirTrack{}, DirSector{}, LastDirTrack{}, LastDirSector{};
 size_t Track[41]{};
+
+int ScreenLeft = 32;
+int ScreenTop = 35;
+int CharX = 0;  //ScreenLeft;
+int CharY = 0;  //ScreenTop;
+
+int NumDirEntries = 0;
+int ThisDirEntry = 0;
+
+//bool InsertLine = false;
+
+unsigned char CurrentColor = 0x0e;      //We start with light blue
+
+bool QuotedText = false;
+bool HeaderText = true;
+
+int NumExtraSpaces = 0;
 
 typedef struct tagBITMAPINFOHEADER {
     int32_t biSize;
@@ -141,6 +212,36 @@ bool CreateDirectory(const string& DiskDir)
         return false;
     }
     return true;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+bool WriteBinaryFile(string FileName, vector <unsigned char> binfile)
+{
+
+    ofstream myFile(FileName + ".bin", ios::out | ios::binary);
+
+    if (myFile.is_open())
+    {
+        //cout << "Writing " + FileName + ".bin" + "...\n";
+        myFile.write((char*)&binfile[0], binfile.size());
+
+        if (!myFile.good())
+        {
+            cerr << "***CRITICAL***\tError during writing " << FileName << ".bin\n";
+            myFile.close();
+            return false;
+        }
+
+        //cout << "Done!\n";
+        return true;
+    }
+    else
+    {
+        cerr << "***CRITICAL***\tError oprning file for writing disk image " << FileName << ".bin\n\n";
+        return false;
+    }
+
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
@@ -301,6 +402,22 @@ string ReadFileToString(const string& FileName, bool CorrectFilePath = false)
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
+unsigned int GetPixel(size_t X, size_t Y)
+{
+    size_t Pos = Y * ((size_t)ImgWidth * 4) + (X * 4);
+
+    unsigned char R = Image[Pos + 0];
+    unsigned char G = Image[Pos + 1];
+    unsigned char B = Image[Pos + 2];
+    //unsigned char A = Image[Pos + 3];
+
+    unsigned int Col = (R << 16) + (G << 8) + B;        //Ignore A
+
+    return Col;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
 void SetPixel(size_t X, size_t Y, unsigned int Col)
 {
     size_t Pos = Y * ((size_t)ImgWidth * 4) + (X * 4);
@@ -316,14 +433,20 @@ void SetPixel(size_t X, size_t Y, unsigned int Col)
     Image[Pos + 3] = A;
 
 }
-
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
-void DrawChar(unsigned char PChar, int ImgX, int ImgY, unsigned int Color)
+void DrawChar(unsigned char Char, unsigned char Col, int PngX, int PngY)
 {
+    int Color = c64palettes[(PaletteIdx * 16) + ColorLtBlue];  //Default = light blue
+    int BkgColor = c64palettes[(PaletteIdx * 16) + ColorBlue];
 
-    unsigned int px = PChar % 16;
-    unsigned int py = PChar / 16;
+    if (Col < 0x10)
+    {
+        Color = c64palettes[(PaletteIdx * 16) + Col];
+    }
+    
+    unsigned int px = Char % 16;
+    unsigned int py = Char / 16;
 
     for (int y = 0; y < 8; y++)
     {
@@ -333,13 +456,400 @@ void DrawChar(unsigned char PChar, int ImgX, int ImgY, unsigned int Color)
 
             if (CharSetTab[CharSetPos] == 1)
             {
-                int PixelX = ImgX + x;
-                int PixelY = ImgY + y;
-                SetPixel(PixelX, PixelY, Color);
+                SetPixel((size_t)PngX + x, (size_t)PngY + y, Color);
             }
-        }//Next x
-    }//Next y
+            else
+            {
+                SetPixel((size_t)PngX + x, (size_t)PngY + y, BkgColor);
+            }
+        }
+    }
+}
 
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+void DrawScreens(unsigned char PChar, bool ConvertToPetscii = false, bool Invert = false)
+{
+    if (!QuotedText)                //Check control codes outside quotes (after return or shift return)
+    {
+        if (PChar == 0x05)          //WHITE
+        {
+            CurrentColor = ColorWhite;
+            return;
+        }
+        else if (PChar == 0x1c)     //RED
+        {
+            CurrentColor = ColorRed;
+            return;
+        }
+        else if (PChar == 0x1e)     //GREEN
+        {
+            CurrentColor = ColorGreen;;
+            return;
+        }
+        else if (PChar == 0x1f)     //BLUE
+        {
+            CurrentColor =ColorBlue;
+            return;
+        }
+        else if (PChar == 0x81)     //ORANGE
+        {
+            CurrentColor = ColorOrange;
+            return;
+        }
+        else if (PChar == 0x90)     //BLACK
+        {
+            CurrentColor = ColorBlack;
+            return;
+        }
+        else if (PChar == 0x95)     //BROWN
+        {
+            CurrentColor = ColorBrown;
+            return;
+        }
+        else if (PChar == 0x96)     //PINK
+        {
+            CurrentColor = ColorPink;
+            return;
+        }
+        else if (PChar == 0x97)     //DARK GREY
+        {
+            CurrentColor = ColorDkGrey;
+            return;
+        }
+        else if (PChar == 0x98)     //MID GREY
+        {
+            CurrentColor = ColorMdGrey;
+            return;
+        }
+        else if (PChar == 0x99)     //LIGHT GREEN
+        {
+            CurrentColor = ColorLtGreen;
+            return;
+        }
+        else if (PChar == 0x9a)     //LIGHT BLUE
+        {
+            CurrentColor = ColorLtBlue;
+            return;
+        }
+        else if (PChar == 0x9b)     //LIGHT GREY
+        {
+            CurrentColor = ColorLtGrey;
+            return;
+        }
+        else if (PChar == 0x9c)     //PURPLE
+        {
+            CurrentColor = ColorPurple;
+            return;
+        }
+        else if (PChar == 0x9e)     //YELLOW
+        {
+            CurrentColor = ColorYellow;
+            return;
+        }
+        else if (PChar == 0x9f)     //CYAN
+        {
+            CurrentColor = ColorCyan;
+            return;
+        }
+        else if (PChar == 0x93)     //CLEAR SCREEN
+        {
+            CharX = 0;
+            CharY = 0;
+            for (size_t i = 0; i < ScrRam.size(); i++)
+            {
+                ScrRam[i] = 0x00;
+                ColRam[i] = 0xff;
+            }
+            //ColRam[0] = CurrentColor;
+            return;
+        }
+        else if (PChar == 0x11)     //CURSOR DOWN
+        {
+            //Crsr down -> check if this is a double line, if yes step to next half otherwise step to next line          
+            CharX += 40;
+
+            if (CharX >= 80)        //First half line
+            {
+                CharX -= 80;
+                CharY++;
+            }
+            else
+            {
+                if (ScrRam[(size_t)(CharY * 80) + 40] == 0x00)  //Second half line - check if empty and step to next first half line if it is empty
+                {
+                    CharX -= 40;
+                    CharY++;
+                }
+            }
+            return;
+        }
+        else if (PChar == 0x91) //CURSOR UP
+        {
+            if (CharX > 40)
+            {
+                CharX -= 40;
+            }
+            else if (CharY > 0)
+            {
+                CharY--;
+                if (ScrRam[(size_t)(CharY * 80) + 40] != 00)
+                {
+                    CharX += 40;
+                }
+            }
+            return;
+        }
+        else if (PChar == 0x13)     //HOME
+        {
+            CharX = 0;
+            CharY = 0;
+            return;
+            }
+        else if (PChar == 0x1d)     //CURSOR RIGHT
+        {
+            CharX++;
+            if (CharX == 40)
+            {
+                if (ScrRam[(size_t)(CharY * 80) + CharX] == 0x00)
+                {
+                    CharX = 0;
+                    CharY++;
+                }
+            }
+            return;
+            }
+        else if (PChar == 0x9d)     //CURSOR LEFT
+        {
+            CharX--;
+            if (CharX < 0)
+            {
+                if (CharY == 0)
+                {
+                    CharX = 0;
+                    return;
+                }
+                else
+                {
+                    CharY--;
+                    if (ScrRam[(size_t)(CharY * 80) + 40] == 0x00)
+                    {
+                        CharX = 39;
+                    }
+                    else
+                    {
+                        CharX = 79;
+                    }
+                }
+            }
+            return;
+        }
+        else if (PChar == 0x94)     //INSERT
+        {
+            for (int x = 78; x >= CharX; x--)
+            {
+                ScrRam[(size_t)(CharY * 80) + x + 1] = ScrRam[(size_t)(CharY * 80) + x];
+                ColRam[(size_t)(CharY * 80) + x + 1] = ColRam[(size_t)(CharY * 80) + x];
+            }
+
+            ScrRam[(size_t)(CharY * 80) + CharX] = 0x20;
+            ColRam[(size_t)(CharY * 80) + CharX] = CurrentColor;
+
+            //If we just pushed the last char of the first halfline to the first pos in the second halfline then fill the rest of the second half line with space
+            if ((ScrRam[(size_t)(CharY * 80) + 40] != 0x00) && (ScrRam[(size_t)(CharY * 80) + 41] == 0x00))
+            {
+                for (int i = 41; i < 80; i++)
+                {
+                    ScrRam[(size_t)(CharY * 80) + i] = 0x20;
+                    ColRam[(size_t)(CharY * 80) + i] = c64palettes[(PaletteIdx * 16) + 0x0e]; //light blue
+                }
+            }
+            return;
+            }
+
+    }
+    
+    //-------------------------------------
+
+    if ((PChar == 0x0d) || (PChar == 0x8d))  //RETURN, SHIFT+RETURN
+    {
+        QuotedText = false;
+        HeaderText = false;
+        CharX = 0;
+        CharY++;
+        return;
+    }
+    else if ((PChar == 0xa0) && (!HeaderText))     //END OF DIR ENTRY
+    {
+        NumExtraSpaces++;       //We will need to correct the entry length after the end-qoute
+        return;
+    }
+    else if (PChar == 0x14)                 //DELETE - ALSO WORKS WITHIN QUOTES
+    {
+        if (CharX > 0)
+        {
+            CharX--;
+            for (size_t x = CharX; x < 78; x++)
+            {
+                ScrRam[(size_t)(CharY * 80) + x] = ScrRam[(size_t)(CharY * 80) + x + 1];
+                ColRam[(size_t)(CharY * 80) + x] = ColRam[(size_t)(CharY * 80) + x + 1];
+            }
+            ScrRam[(size_t)(CharY * 80) + 79] = 0x00;
+            ColRam[(size_t)(CharY * 80) + 79] = 0xff;
+        }
+        else
+        {
+            CharY--;
+            if (ScrRam[(size_t)(CharY * 80) + 40] != 0x00)
+            {
+                CharX = 79;
+            }
+            else
+            {
+                CharX = 39;
+            }
+            ScrRam[(size_t)(CharY * 80) + CharX] = 0x00;
+            ColRam[(size_t)(CharY * 80) + CharX] = 0xff;
+        }
+        return;
+    }
+    else
+    {
+        if (ConvertToPetscii)               //REGULAR CHARS
+        {
+            PChar = Char2Petscii[PChar];
+        }
+
+        if ((Invert) && (HeaderText))
+        {
+            PChar |= 0x80;
+        }
+
+        size_t Pos = (size_t)(CharY * 80) + CharX;
+
+        if (Pos >= ScrRam.size())
+        {
+            ScrRam.resize((size_t)(CharY + 1) * 80);
+            ColRam.resize((size_t)(CharY + 1) * 80);
+
+            for (size_t i = ScrRam.size() - 80; i < ScrRam.size(); i++)
+            {
+                ScrRam[i] = 0x00;
+                ColRam[i] = 0xff;
+            }
+        }
+
+        ScrRam[Pos] = PChar;
+        ColRam[Pos] = CurrentColor;
+
+        CharX++;
+    }
+
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+bool CreatePng()
+{
+#ifdef DEBUG
+    WriteBinaryFile(OutFileName + "Scr", ScrRam);
+    WriteBinaryFile(OutFileName + "Col", ColRam);
+#endif
+
+    NumDirEntries = ScrRam.size() / 80;
+
+    ImgWidth = 384;
+
+#ifdef AddBlockCount
+    ImgHeight = NumDirEntries > 21 ? (NumDirEntries * 8) + 8 + 72 : 272;
+#elif
+    ImgHeight = NumEntries > 24 ? (NumEntries * 8) + 8 + 72 : 272;
+#endif
+
+    Image.resize((size_t)ImgWidth * ImgHeight * 4);
+
+    unsigned int BorderColor = c64palettes[(PaletteIdx * 16) + ColorLtBlue];
+    BkgColor = c64palettes[(PaletteIdx * 16) + ColorBlue];
+
+    int R0 = (BorderColor >> 16) & 0xff;
+    int G0 = (BorderColor >> 8) & 0xff;
+    int B0 = BorderColor & 0xff;
+
+    int R1 = (BkgColor >> 16) & 0xff;
+    int G1 = (BkgColor >> 8) & 0xff;
+    int B1 = BkgColor & 0xff;
+
+    for (size_t y = 0; y < (size_t)ImgHeight; y++)
+    {
+        for (size_t x = 0; x < (size_t)ImgWidth; x++)
+        {
+            size_t Pos = y * ((size_t)ImgWidth * 4) + (x * 4);
+
+            if ((y < 35) || (y >= (size_t)ImgHeight - 37) || (x < 32) || (x >= (size_t)ImgWidth - 32))
+            {
+                Image[Pos + 0] = R0;
+                Image[Pos + 1] = G0;
+                Image[Pos + 2] = B0;
+            }
+            else
+            {
+                Image[Pos + 0] = R1;
+                Image[Pos + 1] = G1;
+                Image[Pos + 2] = B1;
+            }
+            Image[Pos + 3] = 255;
+        }
+    }
+
+    int PngX = ScreenLeft;
+    int PngY = ScreenTop;
+    int i = 0;
+    
+    while ((size_t)(i * 80) < ScrRam.size())
+    {
+        for (int j = 0; j < 40; j++)
+        {
+            if (ScrRam[(size_t)(i * 80) + j] != 0x00)
+            {
+                DrawChar(ScrRam[(size_t)(i * 80) + j], ColRam[(size_t)(i * 80) + j], PngX, PngY);
+            }
+            PngX += 8;
+        }
+        
+        PngX = ScreenLeft;
+        int OldPngY = PngY;
+        
+        for (int j = 40; j < 80; j++)
+        {
+            if (ScrRam[(size_t)(i * 80) + j] != 0x00)
+            {
+                if (OldPngY == PngY)
+                {
+                    PngY += 8;
+                }
+                DrawChar(ScrRam[(size_t)(i * 80) + j], ColRam[(size_t)(i * 80) + j], PngX, PngY);
+            }
+            PngX += 8;
+        }
+
+        PngX = ScreenLeft;
+        PngY += 8;
+
+        i++;
+    }
+
+    unsigned int errorpng = lodepng::encode(OutFileName, Image, ImgWidth, ImgHeight);
+
+    if (errorpng)
+    {
+        cout << "Error during encoding and saving PNG.\n";
+        return false;
+    }
+#ifdef DEBUG    
+    WriteDiskImage(OutFileName + ".d64");
+#endif    
+
+    return true;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
@@ -380,84 +890,53 @@ int CalcNumEntries()
 
 bool ConvertD64ToPng()
 {
-#ifdef DEBUG
-    WriteDiskImage(OutFileName + ".d64");
-#endif
-
-    int NumEntries = CalcNumEntries();
-    ImgWidth = 384;
     
-#ifdef AddBlockCount
-    ImgHeight = NumEntries > 22 ? (NumEntries * 8) + 24 + 72 : 272;
-#elif
-    ImgHeight = NumEntries > 24 ? (NumEntries * 8) + 8 + 72 : 272;
-#endif
+    NumDirEntries = CalcNumEntries();
 
-    Image.resize((size_t)ImgWidth * ImgHeight * 4);
+    ScrRam.resize((size_t)(NumDirEntries + 4) * 80);    //80-char long virtual lines
+    ColRam.resize((size_t)(NumDirEntries + 4) * 80);
 
-    unsigned int BorderColor = 0x7c70da;    //light blue
-    unsigned int BkgColor = 0x3e31a2;       //dark blue
-    unsigned int ForeColor = 0x7c70da;      //light blue
-
-    int R0 = (BorderColor >> 16) & 0xff;
-    int G0 = (BorderColor >> 8) & 0xff;
-    int B0 = BorderColor & 0xff;
-
-    int R1 = (BkgColor >> 16) & 0xff;
-    int G1 = (BkgColor >> 8) & 0xff;
-    int B1 = BkgColor & 0xff;
-
-    for (size_t y = 0; y < (size_t)ImgHeight; y++)
+    for (int i = 0; i < (NumDirEntries + 4) * 80; i++)
     {
-        for (size_t x = 0; x < (size_t)ImgWidth; x++)
-        {
-            size_t Pos = y * ((size_t)ImgWidth * 4) + (x * 4);
-
-            if ((y < 35) || (y >= (size_t)ImgHeight - 37)|| (x < 32) || (x >= (size_t)ImgWidth - 32))
-            {
-                Image[Pos + 0] = R0;
-                Image[Pos + 1] = G0;
-                Image[Pos + 2] = B0;
-            }
-            else
-            {
-                Image[Pos + 0] = R1;
-                Image[Pos + 1] = G1;
-                Image[Pos + 2] = B1;
-            }
-            Image[Pos + 3] = 255;
-        }
+        ScrRam[i] = 0x00;   //Unused Petscii code - indicates that the line is unused
+        ColRam[i] = 0xff;   //Unused color code - no color change needed
     }
 
     DirTrack = 18;
     DirSector = 1;
     DirPos = 2;
 
-    int ImgX = 32;
-    int ImgY = 35;
+    DrawScreens(0x30);
+    DrawScreens(0x20);
+
+    HeaderText = true;
+    DrawScreens(0x22, false, true);
+    QuotedText = true;
 
     unsigned int B = 0;
-    DrawChar(0x30, ImgX, ImgY, ForeColor);
-
-    DrawChar(0xa2, 32 + 0x10, ImgY, ForeColor);
-    DrawChar(0xa2, 32 + 0x98, ImgY, ForeColor);
-    DrawChar(0xa0, 32 + 0xa0, ImgY, ForeColor);
-
     for (int i = 0; i < 16; i++)
     {
         B = Disk[Track[DirTrack] + 0x90 + i];
-        B = Char2Petscii[B] | 0x80;
-        DrawChar(B, ImgX + 0x18 + (i * 8), ImgY, ForeColor);
+        DrawScreens(B, true, true);
     }
+
+    DrawScreens(0x22, false, true);
+    QuotedText = false;
+    DrawScreens(0x20, false, true);
 
     for (int i = 0; i < 5; i++)
     {
         B = Disk[Track[DirTrack] + 0xa2 + i];
-        B = Char2Petscii[B] | 0x80;
-        DrawChar(B, ImgX + 0xa8 + (i * 8), ImgY, ForeColor);
+        if ((i==4) && (B == 0xa0))
+        {
+            B = 0x31;   //if the 5th character is 0xa0 then the C64 displays a "1" instead
+        }
+        DrawScreens(B, true, true);
     }
 
-    ImgY += 8;
+    HeaderText = false;
+
+    CharY ++;
 
     DirTrack = 18;
     DirSector = 1;
@@ -467,113 +946,133 @@ bool ConvertD64ToPng()
     {
         if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos] != 0)
         {
-
             unsigned char ET = Disk[Track[DirTrack] + (DirSector * 256) + DirPos];
+
             string EntryType = "";
             if (ET == 0x01)
             {
-                EntryType = "*SEQ";
+                EntryType = "*SEQ  ";
             }
             else if (ET == 0x02)
             {
-                EntryType = "*PRG";
+                EntryType = "*PRG  ";
             }
             else if (ET == 0x03)
             {
-                EntryType = "*USR";
+                EntryType = "*USR  ";
             }
             else if (ET == 0x80)
             {
-                EntryType = " DEL";
+                EntryType = " DEL  ";
             }
             else if (ET == 0x81)
             {
-                EntryType = " SEQ";
+                EntryType = " SEQ  ";
             }
             else if (ET == 0x82)
             {
-                EntryType = " PRG";
+                EntryType = " PRG  ";
             }
             else if (ET == 0x83)
             {
-                EntryType = " USR";
+                EntryType = " USR  ";
             }
             else if (ET == 0x84)
             {
-                EntryType = " REL";
+                EntryType = " REL  ";
             }
             else if (ET == 0xc0)
             {
-                EntryType = " DEL<";
+                EntryType = " DEL< ";
             }
             else if (ET == 0xc1)
             {
-                EntryType = " SEQ<";
+                EntryType = " SEQ< ";
             }
             else if (ET == 0xc2)
             {
-                EntryType = " PRG<";
+                EntryType = " PRG< ";
             }
             else if (ET == 0xc3)
             {
-                EntryType = " USR<";
+                EntryType = " USR< ";
             }
             else if (ET == 0xc4)
             {
-                EntryType = " REL<";
+                EntryType = " REL< ";
+            }
+
+            int BlockCnt = Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 28] + (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 29] * 256);
+
+            CharX = 0;
+            int NumDigits = 0;
+
+            if (BlockCnt > 9999)
+            {
+                NumDigits++;
+                B = (BlockCnt / 10000) + 0x30;
+                DrawScreens(B);
+            }
+            
+            if (BlockCnt > 999)
+            {
+                NumDigits++;
+                B = ((BlockCnt / 1000) % 10) + 0x30;
+                DrawScreens(B);
+            }
+            
+            if (BlockCnt > 99)
+            {
+                NumDigits++;
+                B = ((BlockCnt / 100) % 10) + 0x30;
+                DrawScreens(B);
+            }
+            
+            if (BlockCnt > 9)
+            {
+                NumDigits++;
+                B = ((BlockCnt / 10) % 10) + 0x30;
+                DrawScreens(B);
+            }
+
+            if (BlockCnt < 9)
+            {
+                NumDigits++;
+                B = (BlockCnt % 10) + 0x30;
+                DrawScreens(B);
+            }
+
+            for (int i = 5; i > NumDigits; i--)
+            {
+                DrawScreens(0x20);
+            }
+
+            DrawScreens(0x22);
+            QuotedText = true;
+            
+            NumExtraSpaces = 0;
+            
+            for (int i = 0; i < 16; i++)
+            {
+                unsigned char NextChar = Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i];
+                DrawScreens(NextChar, true);
+            }
+
+            DrawScreens(0x22);
+            QuotedText = false;
+
+            for (int i = 0; i < NumExtraSpaces; i++)
+            {
+                DrawScreens(0x20);
             }
 
             for (size_t i = 0; i < EntryType.length(); i++)
             {
                 B = EntryType[i];
-                B = Char2Petscii[B];
-                DrawChar(B, (size_t)32 + 48 + 128 + 8 + (i * 8), ImgY, ForeColor);
+                DrawScreens(B, true);
             }
 
-            int BlockCnt = Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 28] + (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 29] * 256);
-
-            if (BlockCnt > 9999)
-            {
-                B = (BlockCnt / 10000) + 0x30;
-                DrawChar(B, ImgX, ImgY, ForeColor);
-                ImgX += 8;
-            }
-            if (BlockCnt > 999)
-            {
-                B = ((BlockCnt / 1000) % 10) + 0x30;
-                DrawChar(B, ImgX, ImgY, ForeColor);
-                ImgX += 8;
-            }
-            if (BlockCnt > 99)
-            {
-                B = ((BlockCnt / 100) % 10) + 0x30;
-                DrawChar(B, ImgX, ImgY, ForeColor);
-                ImgX += 8;
-            }
-            if (BlockCnt > 9)
-            {
-                B = ((BlockCnt / 10) % 10) + 0x30;
-                DrawChar(B, ImgX, ImgY, ForeColor);
-                ImgX += 8;
-            }
-
-            B = (BlockCnt % 10) + 0x30;
-            DrawChar(B, ImgX, ImgY, ForeColor);
-                
-            DrawChar(0x22, 32+40, ImgY, ForeColor);
-            DrawChar(0x22, 32+48+128, ImgY, ForeColor);
-            
-            ImgX = 32 + 48;
-
-            for (int i = 0; i < 16; i++)
-            {
-                unsigned int NextChar = Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i];
-                unsigned char PChar = Char2Petscii[NextChar];
-                DrawChar(PChar, ImgX, ImgY, ForeColor);
-                ImgX += 8;
-            }
-            ImgX = 32;
-            ImgY += 8;
+            CharY ++;
         }
         DirPos += 32;
         if (DirPos > 256)
@@ -589,6 +1088,10 @@ bool ConvertD64ToPng()
                 DirPos = 0;
             }
         }
+
+        //CreatePng();
+
+        ThisDirEntry++;
     }
 
 #ifdef AddBlockCount
@@ -601,71 +1104,68 @@ bool ConvertD64ToPng()
             NumBlocksFree += Disk[Track[DirTrack] + (i * 4)];
         }
     }
+
+    CharX = 0;
     if (NumBlocksFree > 99)
     {
         B = ((NumBlocksFree / 100) % 10) + 0x30;
-        DrawChar(B, ImgX, ImgY, ForeColor);
-        ImgX += 8;
+        DrawScreens(B);
     }
     if (NumBlocksFree > 9)
     {
         B = ((NumBlocksFree / 10) % 10) + 0x30;
-        DrawChar(B, ImgX, ImgY, ForeColor);
-        ImgX += 8;
+        DrawScreens(B);
     }
 
     B = (NumBlocksFree % 10) + 0x30;
-    DrawChar(B, ImgX, ImgY, ForeColor);
-    ImgX += 16;
-    
-    string BlocksFreeMsg = "BLOCKS FREE.";
+    DrawScreens(B);
+
+    string BlocksFreeMsg = " BLOCKS FREE.";
 
     for (size_t i = 0; i < BlocksFreeMsg.length(); i++)
     {
-        B = Char2Petscii[(size_t)BlocksFreeMsg[i]];
-        DrawChar(B, ImgX, ImgY, ForeColor);
-        ImgX += 8;
+        B = BlocksFreeMsg[i];
+        DrawScreens(B, true);
     }
-    ImgX = 32;
-    ImgY += 8;
+
+    CharX = 0;
+    CharY++;
 
     string ReadyMsg = "READY.";
 
     for (size_t i = 0; i < ReadyMsg.length(); i++)
     {
-        B = Char2Petscii[(size_t)ReadyMsg[i]];
-        DrawChar(B, ImgX, ImgY, ForeColor);
-        ImgX += 8;
+        B = ReadyMsg[i];
+        DrawScreens(B, true);
     }
 #endif
 
-
-
-    unsigned int error = lodepng::encode(OutFileName, Image, ImgWidth, ImgHeight);
-
-    if (error)
+    int RamSize = ColRam.size();
+    while (ColRam[(size_t)RamSize - 80] == 0xff)
     {
-        cout << "Error during encoding and saving PNG.\n";
-        return false;
+        RamSize -= 80;
+    }
+    if ((size_t)RamSize < ColRam.size())
+    {
+        ColRam.resize(RamSize);
+        ScrRam.resize(RamSize);
     }
 
-    return true;
-
+    return CreatePng();
 }
-
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
-void MarkSectorAsUsed(size_t T, size_t S)
+void MarkSectorAsUsed(vector<unsigned char>& DiskImage,size_t T, size_t S)
 {
     size_t NumSectorPtr = Track[18] + (T * 4) + ((T > 35) ? 7 * 4 : 0);
-
-    unsigned char NumUnusedSectors = 0;
     
+    unsigned char NumUnusedSectors = 0;
+
     //Calculate number of used sectors -before- update
     for (size_t I = NumSectorPtr + 1; I <= NumSectorPtr + 3; I++)
     {
-        unsigned char B = Disk[I];
+        unsigned char B = DiskImage[I];
         for (int J = 0; J < 8; J++)
         {
             if (B % 2 == 1)
@@ -678,15 +1178,16 @@ void MarkSectorAsUsed(size_t T, size_t S)
 
     size_t BitPtr = NumSectorPtr + 1 + (S / 8);     //BAM Position for Bit Change
     unsigned char BitToDelete = 1 << (S % 8);       //BAM Bit to be deleted
-
-    if ((Disk[BitPtr] & BitToDelete) != 0)
+    
+    if ((DiskImage[BitPtr] & BitToDelete) != 0)
     {
-        Disk[BitPtr] &= (255 - BitToDelete);
+        DiskImage[BitPtr] &= (BitToDelete ^ 0xff);
         NumUnusedSectors--;
     }
 
-    Disk[NumSectorPtr] = NumUnusedSectors;
-
+    DiskImage[NumSectorPtr] = NumUnusedSectors;
+    
+    //cout << hex << T << "\t" << S << "\t" << (int)NumUnusedSectors << "\n";
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
@@ -727,42 +1228,80 @@ void MarkSectorAsFree(size_t T, size_t S)
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
 void FindNextEmptyDirSector()
-{
-    //Check if the BAM shows any free sectors on track 18
-    if (Disk[Track[DirTrack] + (size_t)(18 * 4)] == 0)
-    {
-        DirSector = 0;
-        DirPos = 0;     //This will indicate that the directory is full, no more entries are possible
-        cout << "***INFO***\tDirectory is full.\n";
-        return;
-    }
+{       
+    //Check if the BAM shows any free sectors on the current track
 
+    LastDirTrack = DirTrack;
     LastDirSector = DirSector;
 
-    DirSector = 1; //Skip BAM (Sectors are numbered 0-18 on track 18)
-
-    while (DirSector < NumSectorsTrack18)   //last sector on track 18 is sector 18 (out of 0-18)
+    while(DirTrack > 0)
     {
-        //Check in BAM if this is really a free sector
-        size_t NumSectorPtr = Track[18] + (DirTrack * 4);
-        size_t BitPtr = NumSectorPtr + 1 + (DirSector / 8);     //BAM Position for Bit Change
-        unsigned char BitToCheck = 1 << (DirSector % 8);        //BAM Bit to be deleted
-
-        if ((Disk[BitPtr] & BitToCheck) != 0)
+        if (Disk[Track[18] + (size_t)(DirTrack * 4)] == 0)
         {
-            Disk[Track[DirTrack] + (LastDirSector * 256) + 0] = DirTrack;
-            Disk[Track[DirTrack] + (LastDirSector * 256) + 1] = DirSector;
-            
-            //Make sure the empty sector is actually empty (to avoid unwanted file type attributes)
-            for (int i = 0; i < 256; i++)
+            if (OutputType == "d64")
             {
-                Disk[Track[DirTrack] + (DirSector * 256) + i] = 0;
+                DirSector = 0;
+                DirPos = 0;     //This will indicate that the directory is full, no more entries are possible
+                cout << "***INFO***\tDirectory is full.\n";
+                return;
             }
-            Disk[Track[DirTrack] + (DirSector * 256) + 1] = 255;
-            DirPos = 2;
-            return;
+            else if (OutputType == "png")
+            {
+                if (DirTrack == 35)
+                {
+                    DirTrack = 17;
+                    NumSectorsOnTrack = 21;
+                }
+                else if (DirTrack >= 18)
+                {
+                    DirTrack++;
+                    if (DirTrack < 25)
+                    {
+                        NumSectorsOnTrack = 19;
+                    }
+                    else if (DirTrack < 31)
+                    {
+                        NumSectorsOnTrack = 18;
+                    }
+                    else
+                    {
+                        NumSectorsOnTrack = 17;
+                    }
+                }
+                else
+                {
+                    DirTrack--;
+                }
+            }
         }
-        DirSector++;
+
+        DirSector = 1; //Skip the first sector on each track (weird, but sector 0 as next sector in chain on -any- track means end of directory)
+
+        while (DirSector < (size_t)NumSectorsOnTrack)   //last sector on track 18 is sector 18 (out of 0-18)
+        {
+            //Check in BAM if this is really a free sector
+            size_t NumSectorPtr = Track[18] + (DirTrack * 4);
+            size_t BitPtr = NumSectorPtr + 1 + (DirSector / 8);     //BAM Position for Bit Change
+            unsigned char BitToCheck = 1 << (DirSector % 8);        //BAM Bit to be deleted
+
+            if ((Disk[BitPtr] & BitToCheck) != 0)
+            {
+                //cout << hex << DirTrack << "\t" << DirSector << "\t" << (int)Disk[NumSectorPtr] << "\n";
+
+                Disk[Track[LastDirTrack] + (LastDirSector * 256) + 0] = DirTrack;
+                Disk[Track[LastDirTrack] + (LastDirSector * 256) + 1] = DirSector;
+
+                //Make sure the empty sector is actually empty (to avoid unwanted file type attributes)
+                for (int i = 0; i < 256; i++)
+                {
+                    Disk[Track[DirTrack] + (DirSector * 256) + i] = 0;
+                }
+                Disk[Track[DirTrack] + (DirSector * 256) + 1] = 255;
+                DirPos = 2;
+                return;
+            }
+            DirSector++;
+        }
     }
     
     //Track 18 is full, no more empty sectors
@@ -785,7 +1324,7 @@ void FindNextDirPos() {
         DirPos += 32;
         if (DirPos > 256)   //This sector is full, let's find the next dir sector
         {
-            if(Disk[Track[DirTrack] + (DirSector * 256) + 0] != 0)
+            if ((Disk[Track[DirTrack] + (DirSector * 256) + 0] > 0) && (Disk[Track[DirTrack] + (DirSector * 256) + 0] < 41))
             {
                 //This is NOT the last sector in the T:S chain, we are overwriting existing dir entries
                 int NextT = Disk[Track[DirTrack] + (DirSector * 256) + 0];
@@ -805,11 +1344,6 @@ void FindNextDirPos() {
                     DirTrack = NextT;
                     DirSector = NextS;
                     DirPos = 2;
-                    //BUG reported by Dr Science - we want to keep the existing T:S info 
-                    //for (int i = 2; i < 256; i ++)
-                    //{
-                    //    Disk[Track[DirTrack] + (DirSector * 256) + i] = 0;  //delete all file in dir sector
-                    //}
                 }
             }
             else
@@ -820,9 +1354,9 @@ void FindNextDirPos() {
         }
     }
     
-    if (DirSector != 0)
+    if (DirPos != 0)
     {
-        MarkSectorAsUsed(DirTrack, DirSector);
+        MarkSectorAsUsed(Disk, DirTrack, DirSector);
     }
 }
 
@@ -844,7 +1378,7 @@ bool FindLastUsedDirPos()
     SectorChain[ChainIndex] = DirSector;
 
     //First find the last used directory sector
-    while (Disk[Track[DirTrack] + (DirSector * 256) + 0] != 0)
+    while ((Disk[Track[DirTrack] + (DirSector * 256) + 0] > 0) && (Disk[Track[DirTrack] + (DirSector * 256) + 0] < 41))
     {
         DirTrack = Disk[Track[DirTrack] + (DirSector * 256) + 0];
         DirSector = Disk[Track[DirTrack] + (DirSector * 256) + 1];
@@ -956,7 +1490,7 @@ bool ResetDirEntries()
 
         if (i > 256)
         {
-            if (Disk[Track[DT] + (DS * 256) + 0] != 0)
+            if ((Disk[Track[DT] + (DS * 256) + 0] > 0) && (Disk[Track[DT] + (DS * 256) + 0] < 41))
             {
                 DT = Disk[Track[DT] + (DS * 256) + 0];
                 DS = Disk[Track[DT] + (DS * 256) + 1];
@@ -1031,16 +1565,16 @@ void CreateDisk()
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
-void FixSparkleBAM()
+void FixBAM(vector<unsigned char> &DiskImage)
 {
     DirTrack = 18;
-    DirSector = 1;
+    DirSector = 0;
 
     //Earlier versions of Sparkle disks don't mark DirArt sectors as "used" in the BAM. So let's follow the directory block chain and mark them off
-    while (Disk[Track[DirTrack] + (DirSector * 256) + 0] != 0)
+    while ((DiskImage[Track[DirTrack] + (DirSector * 256) + 0] > 0) && (DiskImage[Track[DirTrack] + (DirSector * 256) + 0] < 41))
     {
-        int NextT = Disk[Track[DirTrack] + (DirSector * 256) + 0];
-        int NextS = Disk[Track[DirTrack] + (DirSector * 256) + 1];
+        int NextT = DiskImage[Track[DirTrack] + (DirSector * 256) + 0];
+        int NextS = DiskImage[Track[DirTrack] + (DirSector * 256) + 1];
 
         if ((NextT == 18) && (NextS == 0))  //Sparkle 1.x marked last secter in chain with 12:00 instead of 00:FF
         {
@@ -1048,21 +1582,21 @@ void FixSparkleBAM()
         }
         else
         {
-            MarkSectorAsUsed(DirTrack, DirSector);
+            MarkSectorAsUsed(DiskImage,DirTrack, DirSector);
             DirTrack = NextT;
             DirSector = NextS;
         }
     }
 
     //Mark last sector as used if there is at least one dir entry (this will avoid marking the first sector off if the dir is completely empty)
-    if (Disk[Track[DirTrack] + (DirSector * 256) + 2] != 0)
+    if (DiskImage[Track[DirTrack] + (DirSector * 256) + 2] != 0)
     {
-        MarkSectorAsUsed(DirTrack, DirSector);
+        MarkSectorAsUsed(DiskImage,DirTrack, DirSector);
     }
 
     //Correct first two bytes of last sector
-    Disk[Track[DirTrack] + (DirSector * 256) + 0] = 0;
-    Disk[Track[DirTrack] + (DirSector * 256) + 1] = 0xff;
+    DiskImage[Track[DirTrack] + (DirSector * 256) + 0] = 0;
+    DiskImage[Track[DirTrack] + (DirSector * 256) + 1] = 0xff;
 
     //Sparkle 2 and 2.1 disks don't mark the internal directory sectors (18:17 and 18:18) off, let's fix it.
     //Sparkle 2.0 dir(0) = $f7 $ff $73 $00
@@ -1070,18 +1604,18 @@ void FixSparkleBAM()
 
     DirTrack = 18;
     DirSector = 17;
-    if (((Disk[Track[DirTrack] + (DirSector * 256) + 0] == 0xf7) &&
-        (Disk[Track[DirTrack] + (DirSector * 256) + 255] == 0xff) &&
-        (Disk[Track[DirTrack] + (DirSector * 256) + 254] == 0x73) &&
-        (Disk[Track[DirTrack] + (DirSector * 256) + 253] == 0x00)) ||
-        ((Disk[Track[DirTrack] + (DirSector * 256) + 0] == 0x77) &&
-            (Disk[Track[DirTrack] + (DirSector * 256) + 255] == 0x7f) &&
-            (Disk[Track[DirTrack] + (DirSector * 256) + 254] == 0x63) &&
-            (Disk[Track[DirTrack] + (DirSector * 256) + 253] == 0x00)))
+    if (((DiskImage[Track[DirTrack] + (DirSector * 256) + 0] == 0xf7) &&
+        (DiskImage[Track[DirTrack] + (DirSector * 256) + 255] == 0xff) &&
+        (DiskImage[Track[DirTrack] + (DirSector * 256) + 254] == 0x73) &&
+        (DiskImage[Track[DirTrack] + (DirSector * 256) + 253] == 0x00)) ||
+        ((DiskImage[Track[DirTrack] + (DirSector * 256) + 0] == 0x77) &&
+            (DiskImage[Track[DirTrack] + (DirSector * 256) + 255] == 0x7f) &&
+            (DiskImage[Track[DirTrack] + (DirSector * 256) + 254] == 0x63) &&
+            (DiskImage[Track[DirTrack] + (DirSector * 256) + 253] == 0x00)))
     {
         //Sparkle 2.0 or Sparkle 2.1+ disk -> mark 18:17 and 18:18 off (internal directory sectors)
-        MarkSectorAsUsed(18, 17);
-        MarkSectorAsUsed(18, 18);
+        MarkSectorAsUsed(DiskImage, DirTrack, DirSector);
+        MarkSectorAsUsed(DiskImage, DirTrack, DirSector + 1);
     }
 }
 
@@ -1093,7 +1627,7 @@ bool OpenOutFile()
     {
         CreateDisk();           //PNG output - creating a virtual D64 first from the input file which will then be converted to PNG
     }
-    else
+    else if (OutputType == "d64")
     {
         DiskSize = ReadBinaryFile(OutFileName, Disk);   //Load the output file if it exists
 
@@ -1108,7 +1642,7 @@ bool OpenOutFile()
             return false;
         }
 
-        FixSparkleBAM();        //Earlier Sparkle versions didn't mark DirArt and internal directory sectors off in the BAM
+        FixBAM(Disk);        //Earlier Sparkle versions didn't mark DirArt and internal directory sectors off in the BAM
     }
 
     DirTrack = 18;
@@ -1160,6 +1694,39 @@ bool ImportFromD64()
         return false;
     }
 
+    if (DA[Track[18] + 0x90] != 0xa0)       //Import directory header only if one exists in input disk image
+    {
+        for (int i = 0; i < 16; i++)
+        {
+            Disk[Track[18] + 0x90 + i] = DA[Track[18] + 0x90 + i];
+        }
+    }
+    else if (!argDiskName.empty())          //Otherwise, check if disk name is specified in command line
+    {
+        for (int i = 0; i < 16; i++)
+        {
+            Disk[Track[18] + 0x90 + i] = Ascii2DirArt[toupper(argDiskName[i])];
+        }
+    }
+
+    if (DA[Track[18] + 0xa2] != 0xa0)       //Import directory ID only if one exists in input disk image
+    {
+        for (int i = 0; i < 5; i++)
+        {
+            Disk[Track[18] + 0xa2 + i] = DA[Track[18] + 0xa2 + i];
+        }
+    }
+    else if (!argDiskID.empty())            //Otherwise, check if disk ID is specified in command line
+    {
+        for (int i = 0; i < 5; i++)
+        {
+            Disk[Track[18] + 0xa2 + i] = Ascii2DirArt[toupper(argDiskID[i])];
+        }
+    }
+    
+    DirTrack = 18;
+    DirSector = 1;
+
     size_t T = 18;
     size_t S = 1;
 
@@ -1201,43 +1768,16 @@ bool ImportFromD64()
         S = DA[DAPtr + 1];
     }
 
-    if (DA[Track[18] + 0x90] != 0xa0)       //Import directory header only if one exists in input disk image
-    {
-        for (int i = 0; i < 16; i++)
-        {
-            Disk[Track[18] + 0x90 + i] = DA[Track[18] + 0x90 + i];
-        }
-    }
-    else if (!argDiskName.empty())          //Otherwise, check if disk name is specified in command line
-    {
-        for (int i = 0; i < 16; i++)
-        {
-            Disk[Track[18] + 0x90 + i] = Ascii2DirArt[toupper(argDiskName[i])];
-        }
-    }
-
-    if (DA[Track[18] + 0xa2] != 0xa0)       //Import directory ID only if one exists in input disk image
-    {
-        for (int i = 0; i < 5; i++)
-        {
-            Disk[Track[18] + 0xa2 + i] = DA[Track[18] + 0xa2 + i];
-        }
-    }
-    else if (!argDiskID.empty())            //Otherwise, check if disk ID is specified in command line
-    {
-        for (int i = 0; i < 5; i++)
-        {
-            Disk[Track[18] + 0xa2 + i] = Ascii2DirArt[toupper(argDiskID[i])];
-        }
-    }
-
     if (OutputType == "png")                //Copy BAM if the output is PNG
     {
         for (int i = 4; i < 144; i++)
         {
             Disk[Track[18] + i] = DA[Track[18] + i];
         }
+
+        FixBAM(Disk);
     }
+    
     return true;
 }
 
@@ -2264,22 +2804,6 @@ bool ImportFromJson()
 //  IMPORT FROM IMAGE
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
-unsigned int GetPixel(size_t X, size_t Y)
-{
-    size_t Pos = Y * ((size_t)ImgWidth * 4) + (X * 4);
-
-    unsigned char R = Image[Pos + 0];
-    unsigned char G = Image[Pos + 1];
-    unsigned char B = Image[Pos + 2];
-    unsigned char A = Image[Pos + 3];
-
-    unsigned int Col = (R * 0x1000000) + (G * 0x10000) + (B * 0x100) + A;
-
-    return Col;
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------------------------
-
 bool IdentifyColors()
 {
     unsigned int Col1 = GetPixel(0, 0);  //The first of two allowed colors per image
@@ -2386,14 +2910,13 @@ bool IdentifyColors()
     }
 #endif // PXDENSITY
 
-
     //Let's use the darker color as BGCol
-    int R1 = Col1 / 0x1000000;
-    int G1 = (Col1 & 0xff0000) / 0x10000;
-    int B1 = (Col1 & 0x00ff00) / 0x100;
-    int R2 = Col2 / 0x1000000;
-    int G2 = (Col2 & 0xff0000) / 0x10000;
-    int B2 = (Col2 & 0x00ff00) / 0x100;
+    int R1 = (Col1 >> 16) & 0xff;
+    int G1 = (Col1 >> 8) & 0xff;
+    int B1 = Col1 & 0xff;
+    int R2 = (Col2 >> 16) & 0xff;
+    int G2 = (Col2 >> 8) & 0xff;
+    int B2 = Col2 & 0xff;
 
     double C1 = sqrt((0.21 * R1 * R1) + (0.72 * G1 * G1) + (0.07 * B1 * B1));
     double C2 = sqrt((0.21 * R2 * R2) + (0.72 * G2 * G2) + (0.07 * B2 * B2));
@@ -2727,7 +3250,7 @@ void ShowInfo()
     cout << "       If an output is not specified then DART will create an input_out.d64 file. If the output file is a PNG then\n";
     cout << "       DART will create a PNG \"screenshot\" of the directory listing instead of a D64 file. If there are less than 23\n";
     cout << "       entries then the ouput PNG's size will be 384 x 272 pixels (same as a VICE screenshot). If there are at least\n";
-    cout << "       23 entries then the width will be 384 pixels and the height will be ((n + 3) * 8) + 72 pixels. The -s option\n";
+    cout << "       23 entries then the width will be 384 pixels and the height will be ((n + 4) * 8) + 72 pixels. The -s option\n";
     cout << "       will be ignored if the output is PNG (you can't append entries to an existing PNG).\n\n";
         
     cout << "-n [\"disk name\"] - the output D64's disk name (left side of the topmost inverted row of the directory listing), max.\n";
@@ -2751,8 +3274,20 @@ void ShowInfo()
     cout << "-f [first imported entry] - a numeric value (1-based) which is used by DART to determine the first DirArt entry to be\n";
     cout << "       imported. This parameter is optional. If not specified, DART will start import with the first DirArt entry.\n\n";
 
-    cout << "-l [last imported entry] - a numeric value (1-based which DART uses to determine the last DirArt entry to be imported.\n";
-    cout << "       This parameter is optional. If not specified, DART will finish import after the last DirArt entry.\n\n";
+    cout << "-l [last imported entry] - a numeric value (1-based) which DART uses to determine the last DirArt entry to be\n";
+    cout << "       imported. This parameter is optional. If not specified, DART will finish import after the last DirArt entry.\n\n";
+
+    cout << "- [palette number (00-22) for PNG output] - a numeric value (0-based) which DART uses to determine the palette to be\n";
+    cout << "       used for a PNG output. You can choose from 23 palettes that are available in VICE 3.8:\n\n";
+    cout << "               00 - C64HQ              08 - Godot              16 - Pepto PAL\n";
+    cout << "               01 - C64S               09 - PALette            17 - Pepto PAL old\n";
+    cout << "               02 - CCS64              10 - PALette 6569R1     18 - Pixcen\n";
+    cout << "               03 - ChristopherJam     11 - PALette 6569R5     19 - Ptoing\n";
+    cout << "               04 - Colodore           12 - PALette 8565R2     20 - RGB\n";
+    cout << "               05 - Community Colors   13 - PC64               21 - VICE 3.8 Original\n";
+    cout << "               06 - Deekay             14 - Pepto NTSC Sony    22 - VICE 3.8 Internal\n";
+    cout << "               07 - Frodo              15 - Pepto NTSC         \n\n";
+    cout << "       If not specified, DART will use Pepto PAL (palette No. 16) as default.\n\n";
 
     cout << "You can only import from one input file at a time. DART will overwrite the existing directory entries in the output\n";
     cout << "file (after skipping the number of entries defined with the -s option) with the new, imported ones, leaving only the\n";
@@ -2847,7 +3382,14 @@ void ShowInfo()
 
     cout << "DART will first import the DirArt from a PNG image file into MyDemo.d64 overwriting all directory entries except\n";
     cout << "the first one, using prg as entry type. Then DART will append entries 3-7 from the second PNG file to the directory\n";
-    cout << "of MyDemo.d64 (keeping all already existing entries in it), using del as (default) entry type.\n";
+    cout << "of MyDemo.d64 (keeping all already existing entries in it), using del as (default) entry type.\n\n";
+
+    cout << "Example 5:\n";
+    cout << "----------\n\n";
+
+    cout << "dart MyDirArt.d64 -o MyDirArt1.png -p 18\n\n";
+
+    cout << "DART will import the DirArt from a D64 file and convert it to a PNG, using palette 18 (Pixcen).\n";
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
@@ -2864,10 +3406,11 @@ int main(int argc, char* argv[])
     {
 
     #ifdef DEBUG
-        InFileName = "c:/dart/test/MM1.d64";
-        OutFileName = "c:/dart/test/MM1.png";
+        InFileName = "c:/dart/test/jab_test.d64";
+        OutFileName = "c:/dart/test/jab_test.png";
         argSkippedEntries = "all";
         argEntryType = "del";
+        argPalette = "1";
     #else
         cout << "Usage: dart input [options]\n";
         cout << "options:    -o <output.d64> or <output.png>\n";
@@ -2876,7 +3419,8 @@ int main(int argc, char* argv[])
         cout << "            -s <skipped entries in output.d64>\n";
         cout << "            -t <default entry type>\n";
         cout << "            -f <first imported entry>\n";
-        cout << "            -l <last imported entry>\n\n";
+        cout << "            -l <last imported entry>\n";
+        cout << "            -p <palette number (00-22) for png output>\n\n";
         cout << "Help:  dart -h\n";
         return EXIT_SUCCESS;
     #endif
@@ -2990,6 +3534,18 @@ int main(int argc, char* argv[])
             else
             {
                 cerr << "***CRITICAL***\tMissing [last imported entry] parameter.\n";
+                return EXIT_FAILURE;
+            }
+        }
+        else if ((args[i] == "-p") || (args[i] == "-P"))       //last imported entry from input
+        {
+            if (i + 1 < argc)
+            {
+                argPalette = args[++i];
+            }
+            else
+            {
+                cerr << "***CRITICAL***\tMissing [palette] parameter.\n";
                 return EXIT_FAILURE;
             }
         }
@@ -3133,6 +3689,29 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
+    if (!argPalette.empty())
+    {
+        if (IsNumeric(argPalette))
+        {
+            PaletteIdx = ConvertStringToInt(argPalette);
+            if ((PaletteIdx < 0) || (PaletteIdx >= NumPalettes))
+            {
+                cerr << "***CRITICAL***\tThe [palette] parameter must have a value between 00-22.\n";
+                return EXIT_FAILURE;
+            }
+        }
+        else
+        {
+            cerr << "***CRITICAL***\tThe [palette] parameter must have a numeric value.\n";
+            return EXIT_FAILURE;
+        }
+    }
+    else
+    {
+        argPalette = "16";
+        PaletteIdx = 16;
+    }
+
     CreateTrackTable();
 
     CorrectFilePathSeparators();        //Replace "\" with "/" which is recognized by Windows as well
@@ -3184,13 +3763,16 @@ int main(int argc, char* argv[])
         OutputType += tolower(OutFileName[i]);
     }
 
-    //if (OutputType == "d64")
-    //{
-        if (!OpenOutFile())
-        {
-            return EXIT_FAILURE;
-        }
-    //}
+    if ((OutputType != "png") && (OutputType != "d64"))
+    {
+        cout << "***CRITICAL***\tUnrecognized output file type: " << OutFileName << "\n";
+        return EXIT_FAILURE;
+    }
+
+    if (!OpenOutFile())
+    {
+        return EXIT_FAILURE;
+    }
 
     string Msg = "";
 
@@ -3310,33 +3892,35 @@ int main(int argc, char* argv[])
         }
     }
 
-    int NumFreeSectors = Disk[Track[DirTrack] + (size_t)(18 * 4)];
-    NumFreeEntries = NumFreeSectors * 8;
-
-    if (DirPos != 0)
-    {
-        for (int i = DirPos + 32; i < 256; i += 32)
-        {
-            NumFreeEntries++;
-        }
-    }
-
     if (OutputType == "d64")
     {
         if (!WriteDiskImage(OutFileName))
         {
             return EXIT_FAILURE;
         }
+
+        int NumFreeSectors = Disk[Track[DirTrack] + (size_t)(18 * 4)];
+        NumFreeEntries = NumFreeSectors * 8;
+
+        if ((DirTrack == 0) && (DirPos != 0))
+        {
+            for (int i = DirPos + 32; i < 256; i += 32)
+            {
+                NumFreeEntries++;
+            }
+        }
+
+        cout << dec << NumFreeEntries << " directory entries remaining unused on track 18.\n";
     }
     else if (OutputType == "png")
     {
+        cout << "Converting DirArt to PNG using palette No. " << C64PaletteNames[PaletteIdx] << "...\n";
         if (!ConvertD64ToPng())
         {
             return EXIT_FAILURE;
         }
+        cout << "Done!\n";
     }
-
-    cout << dec << NumFreeEntries << " directory entries remaining unused on track 18.\n";
 
     return EXIT_SUCCESS;
 }

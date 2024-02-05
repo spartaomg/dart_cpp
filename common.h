@@ -31,3 +31,6 @@ extern const int CharSetTab_size;
 extern unsigned char CharSetTab[];
 extern const int Char2Petscii_size;
 extern unsigned char Char2Petscii[];
+extern const int NumPalettes;	// = 63;
+extern const int c64palettes_size;	// = 1008;
+extern unsigned int c64palettes[];
