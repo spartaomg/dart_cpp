@@ -120,6 +120,8 @@ unsigned char CurrentColor = 0x0e;      //We start with light blue
 
 bool QuotedText = false;
 bool HeaderText = true;
+bool InvertedText = false;
+int CharSet = 0;                        //Upper case = 0, lower case = 1
 
 int NumExtraSpaces = 0;
 
@@ -445,14 +447,14 @@ void DrawChar(unsigned char Char, unsigned char Col, int PngX, int PngY)
         Color = c64palettes[(PaletteIdx * 16) + Col];
     }
     
-    unsigned int px = Char % 16;
-    unsigned int py = Char / 16;
+    unsigned int px = Char % 16;    //lower nibble
+    unsigned int py = Char / 16;    //upper nibble
 
     for (int y = 0; y < 8; y++)
     {
         for (int x = 0; x < 8; x++)
         {
-            unsigned int CharSetPos = (py * 8 * 128) + (y * 128) + (px * 8) + x;
+            unsigned int CharSetPos = (CharSet * CharSetTab_size / 2) + (py * 8 * 128) + (y * 128) + (px * 8) + x;
 
             if (CharSetTab[CharSetPos] == 1)
             {
@@ -550,6 +552,26 @@ void DrawScreen(unsigned char PChar, bool ConvertToPetscii = false, bool Invert 
         else if (PChar == 0x9f)     //CYAN
         {
             CurrentColor = ColorCyan;
+            return;
+        }
+        else if (PChar == 0x12)     //REVERSE ON
+        {
+            InvertedText = true;
+            return;
+        }
+        else if (PChar == 0x92)     //REVERSE OFF
+        {
+            InvertedText = false;
+            return;
+        }
+        else if (PChar == 0x0e)     //LOWER CASE CHARSET
+        {
+            CharSet = 1;
+            return;
+        }
+        else if (PChar == 0x8e)     //UPPER CASE CHARSET
+        {
+            CharSet = 0;
             return;
         }
         else if (PChar == 0x93)     //CLEAR SCREEN
@@ -671,20 +693,21 @@ void DrawScreen(unsigned char PChar, bool ConvertToPetscii = false, bool Invert 
     
     //-------------------------------------
 
-    if ((PChar == 0x0d) || (PChar == 0x8d))  //RETURN, SHIFT+RETURN
+    if ((PChar == 0x0d) || (PChar == 0x8d))         //RETURN, SHIFT+RETURN
     {
         QuotedText = false;
         HeaderText = false;
+        InvertedText = false;
         CharX = 0;
         CharY++;
         return;
     }
-    else if ((PChar == 0xa0) && (!HeaderText))     //END OF DIR ENTRY
+    else if ((PChar == 0xa0) && (!HeaderText))      //END OF DIR ENTRY
     {
         NumExtraSpaces++;       //We will need to correct the entry length after the end-qoute
         return;
     }
-    else if (PChar == 0x14)                 //DELETE - ALSO WORKS WITHIN QUOTES
+    else if (PChar == 0x14)                         //DELETE - ALSO WORKS WITHIN QUOTES
     {
         if (CharX > 0)
         {
@@ -715,12 +738,12 @@ void DrawScreen(unsigned char PChar, bool ConvertToPetscii = false, bool Invert 
     }
     else
     {
-        if (ConvertToPetscii)               //REGULAR CHARS
+        if (ConvertToPetscii)                       //REGULAR CHARS
         {
             PChar = Char2Petscii[PChar];
         }
 
-        if ((Invert) && (HeaderText))
+        if (((Invert) && (HeaderText)) || (InvertedText))   //Invert char if we are in the header or if "reverse" is on. ToDo - remove redundancies here
         {
             PChar |= 0x80;
         }
@@ -3118,7 +3141,7 @@ bool ImportFromImage()
                                 DACol = 1;
                             }
 
-                            size_t CharSetPos = (py * 8 * 128) + (y * 128) + (px * 8) + x;
+                            size_t CharSetPos = (py * 8 * 128) + (y * 128) + (px * 8) + x;  //Only check upper case charset
 
                             if (DACol != CharSetTab[CharSetPos])
                             {
