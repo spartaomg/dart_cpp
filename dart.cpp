@@ -468,7 +468,7 @@ void DrawChar(unsigned char Char, unsigned char Col, int PngX, int PngY)
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
-void DrawScreens(unsigned char PChar, bool ConvertToPetscii = false, bool Invert = false)
+void DrawScreen(unsigned char PChar, bool ConvertToPetscii = false, bool Invert = false)
 {
     if (!QuotedText)                //Check control codes outside quotes (after return or shift return)
     {
@@ -906,23 +906,23 @@ bool ConvertD64ToPng()
     DirSector = 1;
     DirPos = 2;
 
-    DrawScreens(0x30);
-    DrawScreens(0x20);
+    DrawScreen(0x30);
+    DrawScreen(0x20);
 
     HeaderText = true;
-    DrawScreens(0x22, false, true);
+    DrawScreen(0x22, false, true);
     QuotedText = true;
 
     unsigned int B = 0;
     for (int i = 0; i < 16; i++)
     {
         B = Disk[Track[DirTrack] + 0x90 + i];
-        DrawScreens(B, true, true);
+        DrawScreen(B, true, true);
     }
 
-    DrawScreens(0x22, false, true);
+    DrawScreen(0x22, false, true);
     QuotedText = false;
-    DrawScreens(0x20, false, true);
+    DrawScreen(0x20, false, true);
 
     for (int i = 0; i < 5; i++)
     {
@@ -931,7 +931,7 @@ bool ConvertD64ToPng()
         {
             B = 0x31;   //if the 5th character is 0xa0 then the C64 displays a "1" instead
         }
-        DrawScreens(B, true, true);
+        DrawScreen(B, true, true);
     }
 
     HeaderText = false;
@@ -1002,52 +1002,23 @@ bool ConvertD64ToPng()
                 EntryType = " REL< ";
             }
 
-            int BlockCnt = Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 28] + (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 29] * 256);
+            int NumBlocks = Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 28] + (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 29] * 256);
 
             CharX = 0;
-            int NumDigits = 0;
-
-            if (BlockCnt > 9999)
-            {
-                NumDigits++;
-                B = (BlockCnt / 10000) + 0x30;
-                DrawScreens(B);
-            }
             
-            if (BlockCnt > 999)
-            {
-                NumDigits++;
-                B = ((BlockCnt / 1000) % 10) + 0x30;
-                DrawScreens(B);
-            }
+            string BlockCnt = to_string(NumBlocks);
             
-            if (BlockCnt > 99)
+            for (size_t i = 0; i < BlockCnt.size(); i++)
             {
-                NumDigits++;
-                B = ((BlockCnt / 100) % 10) + 0x30;
-                DrawScreens(B);
-            }
-            
-            if (BlockCnt > 9)
-            {
-                NumDigits++;
-                B = ((BlockCnt / 10) % 10) + 0x30;
-                DrawScreens(B);
+                DrawScreen(BlockCnt[i]);
             }
 
-            if (BlockCnt < 9)
+            for (size_t i = 5; i > BlockCnt.size(); i--)
             {
-                NumDigits++;
-                B = (BlockCnt % 10) + 0x30;
-                DrawScreens(B);
+                DrawScreen(0x20);
             }
 
-            for (int i = 5; i > NumDigits; i--)
-            {
-                DrawScreens(0x20);
-            }
-
-            DrawScreens(0x22);
+            DrawScreen(0x22);
             QuotedText = true;
             
             NumExtraSpaces = 0;
@@ -1055,21 +1026,21 @@ bool ConvertD64ToPng()
             for (int i = 0; i < 16; i++)
             {
                 unsigned char NextChar = Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i];
-                DrawScreens(NextChar, true);
+                DrawScreen(NextChar, true);
             }
 
-            DrawScreens(0x22);
+            DrawScreen(0x22);
             QuotedText = false;
 
             for (int i = 0; i < NumExtraSpaces; i++)
             {
-                DrawScreens(0x20);
+                DrawScreen(0x20);
             }
 
             for (size_t i = 0; i < EntryType.length(); i++)
             {
                 B = EntryType[i];
-                DrawScreens(B, true);
+                DrawScreen(B, true);
             }
 
             CharY ++;
@@ -1106,26 +1077,20 @@ bool ConvertD64ToPng()
     }
 
     CharX = 0;
-    if (NumBlocksFree > 99)
+    
+    string BlocksFree = to_string(NumBlocksFree);
+    
+    for (size_t i = 0; i < BlocksFree.size(); i++)
     {
-        B = ((NumBlocksFree / 100) % 10) + 0x30;
-        DrawScreens(B);
+        DrawScreen(BlocksFree[i]);
     }
-    if (NumBlocksFree > 9)
-    {
-        B = ((NumBlocksFree / 10) % 10) + 0x30;
-        DrawScreens(B);
-    }
-
-    B = (NumBlocksFree % 10) + 0x30;
-    DrawScreens(B);
-
+    
     string BlocksFreeMsg = " BLOCKS FREE.";
 
     for (size_t i = 0; i < BlocksFreeMsg.length(); i++)
     {
         B = BlocksFreeMsg[i];
-        DrawScreens(B, true);
+        DrawScreen(B, true);
     }
 
     CharX = 0;
@@ -1136,7 +1101,7 @@ bool ConvertD64ToPng()
     for (size_t i = 0; i < ReadyMsg.length(); i++)
     {
         B = ReadyMsg[i];
-        DrawScreens(B, true);
+        DrawScreen(B, true);
     }
 #endif
 
@@ -1582,7 +1547,10 @@ void FixBAM(vector<unsigned char> &DiskImage)
         }
         else
         {
-            MarkSectorAsUsed(DiskImage,DirTrack, DirSector);
+            if (DirTrack == 18)
+            {
+                MarkSectorAsUsed(DiskImage, DirTrack, DirSector);   //Only mark sectors off on track 18, to keep the original number of blocks free
+            }
             DirTrack = NextT;
             DirSector = NextS;
         }
@@ -1591,7 +1559,10 @@ void FixBAM(vector<unsigned char> &DiskImage)
     //Mark last sector as used if there is at least one dir entry (this will avoid marking the first sector off if the dir is completely empty)
     if (DiskImage[Track[DirTrack] + (DirSector * 256) + 2] != 0)
     {
-        MarkSectorAsUsed(DiskImage,DirTrack, DirSector);
+        if (DirTrack == 18)
+        {
+            MarkSectorAsUsed(DiskImage, DirTrack, DirSector);   //but only if we are still on track 18
+        }
     }
 
     //Correct first two bytes of last sector
@@ -1657,7 +1628,6 @@ bool OpenOutFile()
 
 void CorrectFilePathSeparators()
 {
-
     for (size_t i = 0; i < InFileName.size(); i++)
     {
         if (InFileName[i] == '\\')
@@ -3406,11 +3376,11 @@ int main(int argc, char* argv[])
     {
 
     #ifdef DEBUG
-        InFileName = "c:/dart/test/jab_test.d64";
-        OutFileName = "c:/dart/test/jab_test.png";
+        InFileName = "c:/dart/test/dm.d64";
+        OutFileName = "c:/dart/test/dm.png";
         argSkippedEntries = "all";
         argEntryType = "del";
-        argPalette = "1";
+        argPalette = "18";
     #else
         cout << "Usage: dart input [options]\n";
         cout << "options:    -o <output.d64> or <output.png>\n";
