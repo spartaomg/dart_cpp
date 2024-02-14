@@ -55,24 +55,22 @@ unsigned int FGCol = 0;
 
 int PaletteIdx = 16;
 
-                        //Pixcen colors
-
-int ColorBlack = 0;     // 0x00000000;
-int ColorWhite = 1;     // 0x00ffffff;
-int ColorRed = 2;       // 0x00894036;
-int ColorCyan = 3;      // 0x007abfc7;
-int ColorPurple = 4;    // 0x008a46ae;
-int ColorGreen = 5;     // 0x0068a941;
-int ColorBlue = 6;      // 0x003e31a2;
-int ColorYellow = 7;    // 0x00d0dc71;
-int ColorOrange = 8;    // 0x00905f25;
-int ColorBrown = 9;     // 0x005c4700;
-int ColorPink = 10;     // 0x00bb776d;;
-int ColorDkGrey = 11;   // 0x00555555;
-int ColorMdGrey = 12;   // 0x00808080;
-int ColorLtGreen = 13;  // 0x00acea88;
-int ColorLtBlue = 14;   // 0x007c70da;
-int ColorLtGrey = 15;   // 0x00ababab;
+int ColorBlack = 0;
+int ColorWhite = 1;
+int ColorRed = 2;
+int ColorCyan = 3;
+int ColorPurple = 4;
+int ColorGreen = 5;
+int ColorBlue = 6;
+int ColorYellow = 7;
+int ColorOrange = 8;
+int ColorBrown = 9;
+int ColorPink = 10;
+int ColorDkGrey = 11;
+int ColorMdGrey = 12;
+int ColorLtGreen = 13;
+int ColorLtBlue = 14;
+int ColorLtGrey = 15;
 
 string C64PaletteNames[23] {
 "00 (C64HQ)",
@@ -112,9 +110,9 @@ int CharX = 0;  //ScreenLeft;
 int CharY = 0;  //ScreenTop;
 
 int NumDirEntries = 0;
-int ThisDirEntry = 0;
-
-//bool InsertLine = false;
+#ifdef DEBUG
+    int ThisDirEntry = 0;
+#endif
 
 unsigned char CurrentColor = 0x0e;      //We start with light blue
 
@@ -124,6 +122,10 @@ bool InvertedText = false;
 int CharSet = 0;                        //Upper case = 0, lower case = 1
 
 int NumExtraSpaces = 0;
+
+int NumInserts = 0;
+
+bool CharSetSwitchEnabled = true;
 
 typedef struct tagBITMAPINFOHEADER {
     int32_t biSize;
@@ -472,7 +474,36 @@ void DrawChar(unsigned char Char, unsigned char Col, int PngX, int PngY)
 
 void DrawScreen(unsigned char PChar, bool ConvertToPetscii = false, bool Invert = false)
 {
-    if (!QuotedText)                //Check control codes outside quotes (after return or shift return)
+
+    if (!QuotedText)
+    {
+        if (PChar == 0x94)                         //INSERT
+        {
+            NumInserts++;   //count number of inserts
+
+            for (int x = 78; x >= CharX; x--)
+            {
+                ScrRam[(size_t)(CharY * 80) + x + 1] = ScrRam[(size_t)(CharY * 80) + x];
+                ColRam[(size_t)(CharY * 80) + x + 1] = ColRam[(size_t)(CharY * 80) + x];
+            }
+
+            ScrRam[(size_t)(CharY * 80) + CharX] = 0x20;
+            ColRam[(size_t)(CharY * 80) + CharX] = CurrentColor;
+
+            //If we just pushed the last (non-space) char of the first halfline to the first pos in the second halfline then fill the rest of the second half line with space  
+            if ((ScrRam[(size_t)(CharY * 80) + 40] != 0x00) && (ScrRam[(size_t)(CharY * 80) + 41] == 0x00))
+            {
+                for (int i = 41; i < 80; i++)
+                {
+                    ScrRam[(size_t)(CharY * 80) + i] = 0x20;
+                    ColRam[(size_t)(CharY * 80) + i] = c64palettes[(PaletteIdx * 16) + 0x0e]; //light blue
+                }
+            }
+            return;
+        }
+    }
+
+    if ((!QuotedText) && (NumInserts == 0))                //Check control codes outside quotes (after return or shift return)
     {
         if (PChar == 0x05)          //WHITE
         {
@@ -564,12 +595,12 @@ void DrawScreen(unsigned char PChar, bool ConvertToPetscii = false, bool Invert 
             InvertedText = false;
             return;
         }
-        else if (PChar == 0x0e)     //LOWER CASE CHARSET
+        else if ((PChar == 0x0e) && (CharSetSwitchEnabled))     //LOWER CASE CHARSET
         {
             CharSet = 1;
             return;
         }
-        else if (PChar == 0x8e)     //UPPER CASE CHARSET
+        else if ((PChar == 0x8e) && (CharSetSwitchEnabled))     //UPPER CASE CHARSET
         {
             CharSet = 0;
             return;
@@ -606,7 +637,7 @@ void DrawScreen(unsigned char PChar, bool ConvertToPetscii = false, bool Invert 
             }
             return;
         }
-        else if (PChar == 0x91) //CURSOR UP
+        else if (PChar == 0x91)     //CURSOR UP
         {
             if (CharX > 40)
             {
@@ -666,40 +697,44 @@ void DrawScreen(unsigned char PChar, bool ConvertToPetscii = false, bool Invert 
             }
             return;
         }
-        else if (PChar == 0x94)     //INSERT
+        else if ((PChar == 0x80) || (PChar == 0x82) || (PChar == 0x84) || (PChar == 0x8f) || (PChar == 0x04) || (PChar < 0x03) || (PChar == 0x06) || (PChar == 0x07) || (PChar == 0x0f) || (PChar == 0x10))
         {
-            for (int x = 78; x >= CharX; x--)
-            {
-                ScrRam[(size_t)(CharY * 80) + x + 1] = ScrRam[(size_t)(CharY * 80) + x];
-                ColRam[(size_t)(CharY * 80) + x + 1] = ColRam[(size_t)(CharY * 80) + x];
-            }
-
-            ScrRam[(size_t)(CharY * 80) + CharX] = 0x20;
-            ColRam[(size_t)(CharY * 80) + CharX] = CurrentColor;
-
-            //If we just pushed the last char of the first halfline to the first pos in the second halfline then fill the rest of the second half line with space
-            if ((ScrRam[(size_t)(CharY * 80) + 40] != 0x00) && (ScrRam[(size_t)(CharY * 80) + 41] == 0x00))
-            {
-                for (int i = 41; i < 80; i++)
-                {
-                    ScrRam[(size_t)(CharY * 80) + i] = 0x20;
-                    ColRam[(size_t)(CharY * 80) + i] = c64palettes[(PaletteIdx * 16) + 0x0e]; //light blue
-                }
-            }
             return;
-            }
-
+        }
+        else if ((PChar >= 0x0a) && (PChar <= 0x0c))
+        {
+            return;
+        }
+        else if ((PChar >= 0x15) && (PChar <= 0x1b))
+        {
+            return;
+        }
+        else if ((PChar >= 0x85) && (PChar <= 0x8c))
+        {
+            return;
+        }
     }
     
     //-------------------------------------
 
     if ((PChar == 0x0d) || (PChar == 0x8d))         //RETURN, SHIFT+RETURN
     {
+        NumInserts = 0;
         QuotedText = false;
         HeaderText = false;
         InvertedText = false;
         CharX = 0;
         CharY++;
+        return;
+    }
+    else if (PChar == 0x08)
+    {
+        CharSetSwitchEnabled = false;
+        return;
+    }
+    else if (PChar == 0x09)
+    {
+        CharSetSwitchEnabled = true;
         return;
     }
     else if ((PChar == 0xa0) && (!HeaderText))      //END OF DIR ENTRY
@@ -766,6 +801,12 @@ void DrawScreen(unsigned char PChar, bool ConvertToPetscii = false, bool Invert 
         ColRam[Pos] = CurrentColor;
 
         CharX++;
+
+        if (NumInserts > 0)
+        {
+            NumInserts--;
+        }
+
     }
 
 }
@@ -844,7 +885,7 @@ bool CreatePng()
         
         for (int j = 40; j < 80; j++)
         {
-            if (ScrRam[(size_t)(i * 80) + j] != 0x00)
+            if ((ScrRam[(size_t)(i * 80) + j] != 0x00) && (ScrRam[(size_t)(i * 80) + j] != 0x20))
             {
                 if (OldPngY == PngY)
                 {
@@ -969,6 +1010,8 @@ bool ConvertD64ToPng()
     {
         if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos] != 0)
         {
+            NumInserts = 0;
+
             unsigned char ET = Disk[Track[DirTrack] + (DirSector * 256) + DirPos];
 
             string EntryType = "";
@@ -1082,10 +1125,11 @@ bool ConvertD64ToPng()
                 DirPos = 0;
             }
         }
-
-        //CreatePng();
+#ifdef DEBUG
+        CreatePng();
 
         ThisDirEntry++;
+#endif
     }
 
 #ifdef AddBlockCount
@@ -3399,8 +3443,8 @@ int main(int argc, char* argv[])
     {
 
     #ifdef DEBUG
-        InFileName = "c:/dart/test/dm.d64";
-        OutFileName = "c:/dart/test/dm.png";
+        InFileName = "c:/dart/test/dk1e.d64";
+        OutFileName = "c:/dart/test/dk1e.png";
         argSkippedEntries = "all";
         argEntryType = "del";
         argPalette = "18";
