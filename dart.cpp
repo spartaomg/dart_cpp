@@ -472,7 +472,7 @@ void DrawChar(unsigned char Char, unsigned char Col, int PngX, int PngY)
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
-void DrawScreen(unsigned char PChar, bool ConvertToPetscii = false, bool Invert = false)
+void DrawChar(unsigned char PChar, bool ConvertToPetscii = false, bool Invert = false)
 {
 
     if (!QuotedText)
@@ -639,7 +639,7 @@ void DrawScreen(unsigned char PChar, bool ConvertToPetscii = false, bool Invert 
         }
         else if (PChar == 0x91)     //CURSOR UP
         {
-            if (CharX > 40)
+            if (CharX >= 40)        //Bug fix based on the dir art of Desp-AI-r.d64
             {
                 CharX -= 40;
             }
@@ -816,8 +816,8 @@ void DrawScreen(unsigned char PChar, bool ConvertToPetscii = false, bool Invert 
 bool CreatePng()
 {
 #ifdef DEBUG
-    WriteBinaryFile(OutFileName + "Scr", ScrRam);
-    WriteBinaryFile(OutFileName + "Col", ColRam);
+    //WriteBinaryFile(OutFileName + "Scr", ScrRam);
+    //WriteBinaryFile(OutFileName + "Col", ColRam);
 #endif
 
     NumDirEntries = ScrRam.size() / 80;
@@ -910,7 +910,7 @@ bool CreatePng()
         return false;
     }
 #ifdef DEBUG    
-    WriteDiskImage(OutFileName + ".d64");
+    //WriteDiskImage(OutFileName + ".d64");
 #endif    
 
     return true;
@@ -970,23 +970,23 @@ bool ConvertD64ToPng()
     DirSector = 1;
     DirPos = 2;
 
-    DrawScreen(0x30);
-    DrawScreen(0x20);
+    DrawChar(0x30);
+    DrawChar(0x20);
 
     HeaderText = true;
-    DrawScreen(0x22, false, true);
+    DrawChar(0x22, false, true);
     QuotedText = true;
 
     unsigned int B = 0;
     for (int i = 0; i < 16; i++)
     {
         B = Disk[Track[DirTrack] + 0x90 + i];
-        DrawScreen(B, true, true);
+        DrawChar(B, true, true);
     }
 
-    DrawScreen(0x22, false, true);
+    DrawChar(0x22, false, true);
     QuotedText = false;
-    DrawScreen(0x20, false, true);
+    DrawChar(0x20, false, true);
 
     for (int i = 0; i < 5; i++)
     {
@@ -995,12 +995,12 @@ bool ConvertD64ToPng()
         {
             B = 0x31;   //if the 5th character is 0xa0 then the C64 displays a "1" instead
         }
-        DrawScreen(B, true, true);
+        DrawChar(B, true, true);
     }
 
     HeaderText = false;
 
-    CharY ++;
+    DrawChar(0x0d);    //Instead of CharY ++
 
     DirTrack = 18;
     DirSector = 1;
@@ -1070,46 +1070,48 @@ bool ConvertD64ToPng()
 
             int NumBlocks = Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 28] + (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 29] * 256);
 
-            CharX = 0;
+            //CharX = 0;
             
             string BlockCnt = to_string(NumBlocks);
             
             for (size_t i = 0; i < BlockCnt.size(); i++)
             {
-                DrawScreen(BlockCnt[i]);
+                DrawChar(BlockCnt[i]);
             }
 
             for (size_t i = 5; i > BlockCnt.size(); i--)
             {
-                DrawScreen(0x20);
+                DrawChar(0x20);
             }
 
-            DrawScreen(0x22);
+            DrawChar(0x22);
             QuotedText = true;
             
             NumExtraSpaces = 0;
-            
+
             for (int i = 0; i < 16; i++)
             {
                 unsigned char NextChar = Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i];
-                DrawScreen(NextChar, true);
+                DrawChar(NextChar, true);
             }
 
-            DrawScreen(0x22);
+            DrawChar(0x22);
             QuotedText = false;
 
             for (int i = 0; i < NumExtraSpaces; i++)
             {
-                DrawScreen(0x20);
+                DrawChar(0x20);
             }
 
             for (size_t i = 0; i < EntryType.length(); i++)
             {
                 B = EntryType[i];
-                DrawScreen(B, true);
+                DrawChar(B, true);
             }
 
-            CharY ++;
+            DrawChar(0x0d);     //CharY ++;
+            
+            //CharX = 0;
         }
         DirPos += 32;
         if (DirPos > 256)
@@ -1127,7 +1129,6 @@ bool ConvertD64ToPng()
         }
 #ifdef DEBUG
         CreatePng();
-
         ThisDirEntry++;
 #endif
     }
@@ -1149,7 +1150,7 @@ bool ConvertD64ToPng()
     
     for (size_t i = 0; i < BlocksFree.size(); i++)
     {
-        DrawScreen(BlocksFree[i]);
+        DrawChar(BlocksFree[i]);
     }
     
     string BlocksFreeMsg = " BLOCKS FREE.";
@@ -1157,7 +1158,7 @@ bool ConvertD64ToPng()
     for (size_t i = 0; i < BlocksFreeMsg.length(); i++)
     {
         B = BlocksFreeMsg[i];
-        DrawScreen(B, true);
+        DrawChar(B, true);
     }
 
     CharX = 0;
@@ -1168,7 +1169,7 @@ bool ConvertD64ToPng()
     for (size_t i = 0; i < ReadyMsg.length(); i++)
     {
         B = ReadyMsg[i];
-        DrawScreen(B, true);
+        DrawChar(B, true);
     }
 #endif
 
@@ -3443,8 +3444,8 @@ int main(int argc, char* argv[])
     {
 
     #ifdef DEBUG
-        InFileName = "c:/dart/test/dk1e.d64";
-        OutFileName = "c:/dart/test/dk1e.png";
+        InFileName = "c:/dart/test/desp-ai-r.d64";
+        OutFileName = "c:/dart/test/desp-ai-r.png";
         argSkippedEntries = "all";
         argEntryType = "del";
         argPalette = "18";
