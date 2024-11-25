@@ -479,27 +479,36 @@ void DrawChar(unsigned char PChar, bool ConvertToPetscii = false, bool Invert = 
     {
         if (PChar == 0x94)                         //INSERT
         {
-            NumInserts++;   //count number of inserts
-
-            for (int x = 78; x >= CharX; x--)
+            if ((CharX != 79) && ((ScrRam[(size_t)(CharY * 80) + 79] == 0x20) || (ScrRam[(size_t)(CharY * 80) + 79] == 0x00)))  //Last char of double line space and we are not on the last char
             {
-                ScrRam[(size_t)(CharY * 80) + x + 1] = ScrRam[(size_t)(CharY * 80) + x];
-                ColRam[(size_t)(CharY * 80) + x + 1] = ColRam[(size_t)(CharY * 80) + x];
-            }
+                NumInserts++;   //count number of inserts
 
-            ScrRam[(size_t)(CharY * 80) + CharX] = 0x20;
-            ColRam[(size_t)(CharY * 80) + CharX] = CurrentColor;
-
-            //If we just pushed the last (non-space) char of the first halfline to the first pos in the second halfline then fill the rest of the second half line with space  
-            if ((ScrRam[(size_t)(CharY * 80) + 40] != 0x00) && (ScrRam[(size_t)(CharY * 80) + 41] == 0x00))
-            {
-                for (int i = 41; i < 80; i++)
+                int MaxX = 38;
+                if ((ScrRam[(size_t)(CharY * 80) + 40] != 0x00) || ((ScrRam[(size_t)(CharY * 80) + 39] != 0x00) && (ScrRam[(size_t)(CharY * 80) + 39] != 0x20)))
                 {
-                    ScrRam[(size_t)(CharY * 80) + i] = 0x20;
-                    ColRam[(size_t)(CharY * 80) + i] = c64palettes[(PaletteIdx * 16) + 0x0e]; //light blue
+                    MaxX = 78;
                 }
+
+                for (int x = MaxX; x >= CharX; x--)
+                {
+                    ScrRam[(size_t)(CharY * 80) + x + 1] = ScrRam[(size_t)(CharY * 80) + x];
+                    ColRam[(size_t)(CharY * 80) + x + 1] = ColRam[(size_t)(CharY * 80) + x];
+                }
+
+                ScrRam[(size_t)(CharY * 80) + CharX] = 0x20;
+                ColRam[(size_t)(CharY * 80) + CharX] = CurrentColor;
+
+                //If we just pushed the last (non-space) char of the first halfline to the first pos in the second halfline then fill the rest of the second half line with space  
+                if ((ScrRam[(size_t)(CharY * 80) + 40] != 0x00) && (ScrRam[(size_t)(CharY * 80) + 41] == 0x00))
+                {
+                    for (int i = 41; i < 80; i++)
+                    {
+                        ScrRam[(size_t)(CharY * 80) + i] = 0x20;
+                        ColRam[(size_t)(CharY * 80) + i] = c64palettes[(PaletteIdx * 16) + 0x0e]; //light blue
+                    }
+                }
+                return;
             }
-            return;
         }
     }
 
@@ -820,7 +829,26 @@ bool CreatePng()
     //WriteBinaryFile(OutFileName + "Col", ColRam);
 #endif
 
-    NumDirEntries = ScrRam.size() / 80;
+    size_t LastEntry = ColRam.size();
+
+    for (size_t i = ColRam.size(); i >= 40; i -= 40)
+    {
+        if (ColRam[i - 40] != 0xff)
+        {
+            LastEntry = i;
+            break;
+        }
+    }
+
+    NumDirEntries = 0;
+
+    for (size_t i = 0; i < LastEntry; i += 40)
+    {
+        if ((ColRam[i] != 0xff) || (i % 80 == 0))
+        {
+            NumDirEntries++;
+        }
+    }
 
     ImgWidth = 384;
 
@@ -953,8 +981,12 @@ int CalcNumEntries()
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
 bool ConvertD64ToPng()
-{
-    
+{   
+
+#ifdef DEBUG
+    //WriteDiskImage("C:/Dart/Test/Test.d64");
+#endif
+
     NumDirEntries = CalcNumEntries();
 
     ScrRam.resize((size_t)(NumDirEntries + 4) * 80);    //80-char long virtual lines
@@ -1128,8 +1160,8 @@ bool ConvertD64ToPng()
             }
         }
 #ifdef DEBUG
-        CreatePng();
-        ThisDirEntry++;
+        //CreatePng();
+        //ThisDirEntry++;
 #endif
     }
 
@@ -1174,6 +1206,7 @@ bool ConvertD64ToPng()
 #endif
 
     int RamSize = ColRam.size();
+
     while (ColRam[(size_t)RamSize - 80] == 0xff)
     {
         RamSize -= 80;
@@ -1261,15 +1294,17 @@ void MarkSectorAsFree(size_t T, size_t S)
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
 void FindNextEmptyDirSector()
-{       
+{
     //Check if the BAM shows any free sectors on the current track
 
     LastDirTrack = DirTrack;
     LastDirSector = DirSector;
 
+    size_t BAMPos = Track[18] + (size_t)(DirTrack * 4);
+
     while(DirTrack > 0)
     {
-        if (Disk[Track[18] + (size_t)(DirTrack * 4)] == 0)
+        if ((Disk[BAMPos] == 0) || ((Disk[BAMPos] == 1) && (Disk[BAMPos + 1] == 0x01)))
         {
             if (OutputType == "d64")
             {
@@ -1301,9 +1336,16 @@ void FindNextEmptyDirSector()
                         NumSectorsOnTrack = 17;
                     }
                 }
-                else
+                else if (DirTrack > 1)
                 {
                     DirTrack--;
+                }
+                else
+                {
+                    DirSector = 0;
+                    DirPos = 0;
+                    cout << "***INFO***\tDirectory is full.\n";
+                    return;
                 }
             }
         }
@@ -1360,24 +1402,25 @@ void FindNextDirPos() {
             if ((Disk[Track[DirTrack] + (DirSector * 256) + 0] > 0) && (Disk[Track[DirTrack] + (DirSector * 256) + 0] < 41))
             {
                 //This is NOT the last sector in the T:S chain, we are overwriting existing dir entries
+                
                 int NextT = Disk[Track[DirTrack] + (DirSector * 256) + 0];
                 int NextS = Disk[Track[DirTrack] + (DirSector * 256) + 1];
                 
-                if (NextT != 18)
-                {
-                    //DART doesn't support directories outside track 18
-                    DirSector = 0;
-                    DirPos = 0;
-                    cout << "***INFO***\tThis directory sector chain leaves track 18. DART doesn't support directories outside track 18!\n";
-                    return;
-                }
-                else
-                {
+                //if (NextT != 18)
+                //{
+                //    //DART doesn't support directories outside track 18
+                //    DirSector = 0;
+                //    DirPos = 0;
+                //    cout << "***INFO***\tThis directory sector chain leaves track 18. DART doesn't support directories outside track 18!\n";
+                //    return;
+                //}
+                //else
+                //{
                     //Otherwise, go to next dir sector in T:S chain and overwrite first directory entry
                     DirTrack = NextT;
                     DirSector = NextS;
                     DirPos = 2;
-                }
+                //}
             }
             else
             {
@@ -3444,11 +3487,11 @@ int main(int argc, char* argv[])
     {
 
     #ifdef DEBUG
-        InFileName = "c:/dart/test/desp-ai-r.d64";
-        OutFileName = "c:/dart/test/desp-ai-r.png";
+        InFileName = "c:/dart/test/lmdf.d64";
+        OutFileName = "c:/dart/test/lmdf.png";
         argSkippedEntries = "all";
         argEntryType = "del";
-        argPalette = "18";
+        //argPalette = "18";
     #else
         cout << "Usage: dart input [options]\n";
         cout << "options:    -o <output.d64> or <output.png>\n";
@@ -3823,28 +3866,31 @@ int main(int argc, char* argv[])
         Msg = "Importing DirArt entries: all\n";
     }
 
-    if (AppendMode)
+    if (OutputType == "d64")
     {
-        Msg += "Import mode: Append, skipping all existing directory entries in " + OutFileName + "\n";
-        
-        //Let's find the last used dir entry slot, we will continue with the next, empty one
-        if (!FindLastUsedDirPos())
-            return EXIT_FAILURE;
-    }
-    else
-    {
-        Msg += "Import mode: Overwrite";
-        if (NumSkippedEntries > 0)
+        if (AppendMode)
         {
-            Msg += ", skipping " + argSkippedEntries + " directory " + ((NumSkippedEntries == 1) ? "entry in " : "entries in ") + OutFileName + "\n";
+            Msg += "Import mode: Append, skipping all existing directory entries in " + OutFileName + "\n";
+
+            //Let's find the last used dir entry slot, we will continue with the next, empty one
+            if (!FindLastUsedDirPos())
+                return EXIT_FAILURE;
         }
         else
         {
-            Msg += "\n";
-        }
+            Msg += "Import mode: Overwrite";
+            if (NumSkippedEntries > 0)
+            {
+                Msg += ", skipping " + argSkippedEntries + " directory " + ((NumSkippedEntries == 1) ? "entry in " : "entries in ") + OutFileName + "\n";
+            }
+            else
+            {
+                Msg += "\n";
+            }
 
-        if (!ResetDirEntries())
-            return EXIT_FAILURE;
+            if (!ResetDirEntries())
+                return EXIT_FAILURE;
+        }
     }
 
     Msg += "Default DirArt entry type: " + argEntryType + "\n";
