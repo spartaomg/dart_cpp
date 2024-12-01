@@ -3,6 +3,11 @@
 #define AddBlockCount
 
 #include "common.h"
+#include "thirdparty/gif.h"
+
+const int GifWidth = 384;
+const int GifHeight = 272;
+static uint8_t GifImage[GifWidth * GifHeight * 4];
 
 const int StdDiskSize = (664 + 19) * 256;
 const int ExtDiskSize = StdDiskSize + (85 * 256);
@@ -437,7 +442,67 @@ void SetPixel(size_t X, size_t Y, unsigned int Col)
     Image[Pos + 3] = A;
 
 }
+
 //----------------------------------------------------------------------------------------------------------------------------------------------------
+
+void SetGifPixel(int X, int Y, unsigned int Col)
+{
+    int Pos = (Y * GifWidth + X) * 4;
+
+    if (Pos < GifWidth * GifHeight * 4)
+    {
+        uint8_t* pixel = &GifImage[Pos];
+
+        unsigned char R = (Col >> 16) & 0xff;
+        unsigned char G = (Col >> 8) & 0xff;
+        unsigned char B = Col & 0xff;
+        unsigned char A = 255;
+
+        pixel[0] = R;
+        pixel[1] = G;
+        pixel[2] = B;
+        pixel[3] = A;
+    }
+
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+void DrawGifChar(unsigned char Char, unsigned char Col, int GifX, int GifY)
+{
+
+    int Color = c64palettes[(PaletteIdx * 16) + ColorLtBlue];  //Default = light blue
+    int BkgColor = c64palettes[(PaletteIdx * 16) + ColorBlue];
+
+    if (Col < 0x10)
+    {
+        Color = c64palettes[(PaletteIdx * 16) + Col];
+    }
+
+    unsigned int px = Char % 16;    //lower nibble
+    unsigned int py = Char / 16;    //upper nibble
+
+    for (int y = 0; y < 8; y++)
+    {
+        for (int x = 0; x < 8; x++)
+        {
+            unsigned int CharSetPos = (CharSet * CharSetTab_size / 2) + (py * 8 * 128) + (y * 128) + (px * 8) + x;
+
+            if (CharSetTab[CharSetPos] == 1)
+            {
+                SetGifPixel((size_t)GifX + x, (size_t)GifY + y, Color);
+            }
+            else
+            {
+                SetGifPixel((size_t)GifX + x, (size_t)GifY + y, BkgColor);
+            }
+        }
+    }
+
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
 
 void DrawChar(unsigned char Char, unsigned char Col, int PngX, int PngY)
 {
@@ -644,6 +709,13 @@ void DrawChar(unsigned char PChar, bool ConvertToPetscii = false, bool Invert = 
                     CharY++;
                 }
             }
+
+            if (ColRam[CharY * 80] == 0xff)
+            {
+                ScrRam[CharY * 80] = 0x20;
+                ColRam[CharY * 80] = CurrentColor;
+            }
+
             return;
         }
         else if (PChar == 0x91)     //CURSOR UP
@@ -734,6 +806,13 @@ void DrawChar(unsigned char PChar, bool ConvertToPetscii = false, bool Invert = 
         InvertedText = false;
         CharX = 0;
         CharY++;
+
+        if (ColRam[CharY * 80] == 0xff)
+        {
+            ScrRam[CharY * 80] = 0x20;
+            ColRam[CharY * 80] = CurrentColor;
+        }
+
         return;
     }
     else if (PChar == 0x08)
@@ -980,6 +1059,488 @@ int CalcNumEntries()
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
+void CreateGifFrame()
+{
+    size_t FirstEntryPos = 0;
+    size_t LastEntryPos = ColRam.size();
+
+    for (size_t i = ColRam.size(); i >= 40; i -= 40)
+    {
+        if (ColRam[i - 40] != 0xff)
+        {
+            LastEntryPos = i;
+            break;
+        }
+    }
+
+    NumDirEntries = 0;
+
+    for (size_t i = 0; i < LastEntryPos; i += 40)
+    {
+        if ((ColRam[i] != 0xff) || (i % 80 == 0))
+        {
+            NumDirEntries++;
+        }
+    }
+    int NumEntries = 0;
+
+    for (size_t i = LastEntryPos; i >= 40; i -= 40)
+    {
+        if ((ColRam[i - 40] != 0xff) || ((i - 40) % 80 == 0))
+        {
+            NumEntries++;
+            if (NumEntries == 25)
+            {
+                FirstEntryPos = i;
+                break;
+            }
+        }
+    }
+
+    unsigned int BorderColor = c64palettes[(PaletteIdx * 16) + ColorLtBlue];
+    BkgColor = c64palettes[(PaletteIdx * 16) + ColorBlue];
+
+    int R0 = (BorderColor >> 16) & 0xff;
+    int G0 = (BorderColor >> 8) & 0xff;
+    int B0 = BorderColor & 0xff;
+
+    int R1 = (BkgColor >> 16) & 0xff;
+    int G1 = (BkgColor >> 8) & 0xff;
+    int B1 = BkgColor & 0xff;
+
+    for (size_t y = 0; y < (size_t)GifHeight; y++)
+    {
+        for (size_t x = 0; x < (size_t)GifWidth; x++)
+        {
+            size_t Pos = y * ((size_t)GifWidth * 4) + (x * 4);
+
+            if ((y < 35) || (y >= (size_t)GifHeight - 37) || (x < 32) || (x >= (size_t)GifWidth - 32))
+            {
+                GifImage[Pos + 0] = R0;
+                GifImage[Pos + 1] = G0;
+                GifImage[Pos + 2] = B0;
+            }
+            else
+            {
+                GifImage[Pos + 0] = R1;
+                GifImage[Pos + 1] = G1;
+                GifImage[Pos + 2] = B1;
+            }
+            GifImage[Pos + 3] = 255;
+        }
+    }
+
+    int GifX = ScreenLeft;
+    int GifY = ScreenTop;
+    int i = FirstEntryPos / 80;
+
+    while ((size_t)(i * 80) < ScrRam.size())
+    {
+        for (int j = 0; j < 40; j++)
+        {
+            if (ScrRam[(size_t)(i * 80) + j] != 0x00)
+            {
+                DrawGifChar(ScrRam[(size_t)(i * 80) + j], ColRam[(size_t)(i * 80) + j], GifX, GifY);
+            }
+            GifX += 8;
+        }
+
+        GifX = ScreenLeft;
+        int OldPngY = GifY;
+
+        for (int j = 40; j < 80; j++)
+        {
+            if ((ScrRam[(size_t)(i * 80) + j] != 0x00) && (ScrRam[(size_t)(i * 80) + j] != 0x20))
+            {
+                if (OldPngY == GifY)
+                {
+                    GifY += 8;
+                }
+                DrawGifChar(ScrRam[(size_t)(i * 80) + j], ColRam[(size_t)(i * 80) + j], GifX, GifY);
+            }
+            GifX += 8;
+        }
+
+        GifX = ScreenLeft;
+        GifY += 8;
+
+        i++;
+    }
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+bool ConvertD64ToGif()
+{
+    int FrameCount = 0;
+#ifdef DEBUG
+    //WriteDiskImage("C:/Dart/Test/Test.d64");
+#endif
+
+    const char* GifFileName = OutFileName.c_str();
+
+    GifWriter Gif = {};
+    GifBegin(&Gif, GifFileName, GifWidth, GifHeight, 2);
+
+    NumDirEntries = CalcNumEntries();
+
+    ScrRam.resize((size_t)(NumDirEntries + 4+6) * 80);    //80-char long virtual lines
+    ColRam.resize((size_t)(NumDirEntries + 4+6) * 80);
+
+    for (int i = 0; i < (NumDirEntries + 4 + 6) * 80; i++)
+    {
+        ScrRam[i] = 0x00;   //Unused Petscii code - indicates that the line is unused
+        ColRam[i] = 0xff;   //Unused color code - no color change needed
+    }
+    //          01234567890123456789012345678901234567890123456789012345678901234567890123456789
+    string S = "                                            **** COMMODORE 64 BASIC V2 ****";
+
+    unsigned int B = 0;
+    CharX = 0;
+    CharY = 0;
+    
+    for (size_t i = 0; i < S.length(); i++)
+    {
+        B = S[i];
+        DrawChar(B, true);
+    }
+
+    DrawChar(0x0d);    //Instead of CharY ++
+
+    //   01234567890123456789012345678901234567890123456789012345678901234567890123456789
+    S = "                                         64K RAM SYSTEM  38911 BASIC BYTES FREE";
+
+    for (size_t i = 0; i < S.length(); i++)
+    {
+        B = S[i];
+        DrawChar(B, true);
+    }
+
+    DrawChar(0x0d);    //Instead of CharY ++
+
+    //   01234567890123456789012345678901234567890123456789012345678901234567890123456789
+    S = "                                        READY";
+
+    for (size_t i = 0; i < S.length(); i++)
+    {
+        B = S[i];
+        DrawChar(B, true);
+    }
+
+    DrawChar(0x0d);    //Instead of CharY ++
+
+    //   01234567890123456789012345678901234567890123456789012345678901234567890123456789
+    S = "LOAD\"$\",8";
+
+    for (size_t i = 0; i < S.length(); i++)
+    {
+        B = S[i];
+        DrawChar(B, true);
+    }
+
+    DrawChar(0x0d);    //Instead of CharY ++
+
+    //   01234567890123456789012345678901234567890123456789012345678901234567890123456789
+    S = "                                        SEARCHING FOR $";
+
+    for (size_t i = 0; i < S.length(); i++)
+    {
+        B = S[i];
+        DrawChar(B, true);
+    }
+
+    DrawChar(0x0d);    //Instead of CharY ++
+
+    //   01234567890123456789012345678901234567890123456789012345678901234567890123456789
+    S = "LOADING                                 READY";
+
+    for (size_t i = 0; i < S.length(); i++)
+    {
+        B = S[i];
+        DrawChar(B, true);
+    }
+
+    DrawChar(0x0d);    //Instead of CharY ++
+
+    //   01234567890123456789012345678901234567890123456789012345678901234567890123456789
+    S = "LIST";
+
+    for (size_t i = 0; i < S.length(); i++)
+    {
+        B = S[i];
+        DrawChar(B, true);
+    }
+
+    for (int i = 0; i < 2; i++)
+    {
+
+        InvertedText = true;
+        DrawChar(0x20, true);
+
+        CreateGifFrame();
+        GifWriteFrame(&Gif, GifImage, GifWidth, GifHeight, 50);
+
+        CharX--;
+        InvertedText = false;
+        DrawChar(0x20, true);
+
+        CreateGifFrame();
+        GifWriteFrame(&Gif, GifImage, GifWidth, GifHeight, 50);
+
+        CharX--;
+    }
+
+    DrawChar(0x0d);    //Instead of CharY ++
+    DrawChar(0x0d);    //Instead of CharY ++
+
+    CreateGifFrame();
+    GifWriteFrame(&Gif, GifImage, GifWidth, GifHeight, 2);
+
+    DirTrack = 18;
+    DirSector = 1;
+    DirPos = 2;
+
+    DrawChar(0x30);
+    DrawChar(0x20);
+
+    HeaderText = true;
+    DrawChar(0x22, false, true);
+    QuotedText = true;
+
+    for (int i = 0; i < 16; i++)
+    {
+        B = Disk[Track[DirTrack] + 0x90 + i];
+        DrawChar(B, true, true);
+    }
+
+    DrawChar(0x22, false, true);
+    QuotedText = false;
+    DrawChar(0x20, false, true);
+
+    CreateGifFrame();
+    GifWriteFrame(&Gif, GifImage, GifWidth, GifHeight, 2);
+
+    for (int i = 0; i < 5; i++)
+    {
+        B = Disk[Track[DirTrack] + 0xa2 + i];
+        if ((i == 4) && (B == 0xa0))
+        {
+            B = 0x31;   //if the 5th character is 0xa0 then the C64 displays a "1" instead
+        }
+        DrawChar(B, true, true);
+    }
+
+    HeaderText = false;
+
+    DrawChar(0x0d);    //Instead of CharY ++
+
+    DirTrack = 18;
+    DirSector = 1;
+    DirPos = 2;
+
+    while (DirPos != 0)
+    {
+        if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos] != 0)
+        {
+            NumInserts = 0;
+
+            unsigned char ET = Disk[Track[DirTrack] + (DirSector * 256) + DirPos];
+
+            string EntryType = "";
+            if (ET == 0x01)
+            {
+                EntryType = "*SEQ  ";
+            }
+            else if (ET == 0x02)
+            {
+                EntryType = "*PRG  ";
+            }
+            else if (ET == 0x03)
+            {
+                EntryType = "*USR  ";
+            }
+            else if (ET == 0x80)
+            {
+                EntryType = " DEL  ";
+            }
+            else if (ET == 0x81)
+            {
+                EntryType = " SEQ  ";
+            }
+            else if (ET == 0x82)
+            {
+                EntryType = " PRG  ";
+            }
+            else if (ET == 0x83)
+            {
+                EntryType = " USR  ";
+            }
+            else if (ET == 0x84)
+            {
+                EntryType = " REL  ";
+            }
+            else if (ET == 0xc0)
+            {
+                EntryType = " DEL< ";
+            }
+            else if (ET == 0xc1)
+            {
+                EntryType = " SEQ< ";
+            }
+            else if (ET == 0xc2)
+            {
+                EntryType = " PRG< ";
+            }
+            else if (ET == 0xc3)
+            {
+                EntryType = " USR< ";
+            }
+            else if (ET == 0xc4)
+            {
+                EntryType = " REL< ";
+            }
+
+            int NumBlocks = Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 28] + (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 29] * 256);
+
+            //CharX = 0;
+
+            string BlockCnt = to_string(NumBlocks);
+
+            for (size_t i = 0; i < BlockCnt.size(); i++)
+            {
+                DrawChar(BlockCnt[i]);
+            }
+
+            for (size_t i = 5; i > BlockCnt.size(); i--)
+            {
+                DrawChar(0x20);
+            }
+
+            DrawChar(0x22);
+            QuotedText = true;
+
+            NumExtraSpaces = 0;
+
+            for (int i = 0; i < 16; i++)
+            {
+                unsigned char NextChar = Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i];
+                DrawChar(NextChar, true);
+            }
+
+            DrawChar(0x22);
+            QuotedText = false;
+
+            for (int i = 0; i < NumExtraSpaces; i++)
+            {
+                DrawChar(0x20);
+            }
+
+            for (size_t i = 0; i < EntryType.length(); i++)
+            {
+                B = EntryType[i];
+                DrawChar(B, true);
+            }
+
+            DrawChar(0x0d);     //CharY ++;
+
+            //CharX = 0;
+        }
+        DirPos += 32;
+        if (DirPos > 256)
+        {
+            DirPos -= 256;
+            int NT = Disk[Track[DirTrack] + (DirSector * 256) + 0];
+            int NS = Disk[Track[DirTrack] + (DirSector * 256) + 1];
+            DirTrack = NT;
+            DirSector = NS;
+
+            if (DirTrack == 0)
+            {
+                DirPos = 0;
+            }
+        }
+
+        CreateGifFrame();
+        GifWriteFrame(&Gif, GifImage, GifWidth, GifHeight, 2);
+        if (FrameCount % 10 == 0)
+        {
+            cout << ".";
+        }
+        FrameCount++;
+    }
+
+#ifdef AddBlockCount
+    int NumBlocksFree = 0;
+    DirTrack = 18;
+    for (size_t i = 1; i < 36; i++)
+    {
+        if (i != 18)        //Skip track 18
+        {
+            NumBlocksFree += Disk[Track[DirTrack] + (i * 4)];
+        }
+    }
+
+    CharX = 0;
+
+    string BlocksFree = to_string(NumBlocksFree);
+
+    for (size_t i = 0; i < BlocksFree.size(); i++)
+    {
+        DrawChar(BlocksFree[i]);
+    }
+
+    string BlocksFreeMsg = " BLOCKS FREE.";
+
+    for (size_t i = 0; i < BlocksFreeMsg.length(); i++)
+    {
+        B = BlocksFreeMsg[i];
+        DrawChar(B, true);
+    }
+
+    CreateGifFrame();
+    GifWriteFrame(&Gif, GifImage, GifWidth, GifHeight, 2);
+
+    CharX = 0;
+    CharY++;
+
+    string ReadyMsg = "READY.";
+
+    for (size_t i = 0; i < ReadyMsg.length(); i++)
+    {
+        B = ReadyMsg[i];
+        DrawChar(B, true);
+    }
+#endif
+
+    DrawChar(0x0d);    //Instead of CharY ++
+
+    size_t Pos = (size_t)(CharY * 80) + CharX;
+    B = ScrRam[Pos];
+
+    if (B == 0x00)
+    {
+        B = 0x20;
+        ColRam[Pos] = CurrentColor;
+    }
+
+    for (int i = 0; i < 6; i++)
+    {
+        B = B ^ 0x80;
+        ScrRam[Pos] = B;
+
+        CreateGifFrame();
+        GifWriteFrame(&Gif, GifImage, GifWidth, GifHeight, 50);
+    }
+
+    GifEnd(&Gif);
+    
+    cout << "\n";
+    
+    return true;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
 bool ConvertD64ToPng()
 {   
 
@@ -1159,6 +1720,7 @@ bool ConvertD64ToPng()
                 DirPos = 0;
             }
         }
+
 #ifdef DEBUG
         //CreatePng();
         //ThisDirEntry++;
@@ -1313,7 +1875,7 @@ void FindNextEmptyDirSector()
                 cout << "***INFO***\tDirectory is full.\n";
                 return;
             }
-            else if (OutputType == "png")
+            else if ((OutputType == "png") ||(OutputType == "gif"))
             {
                 if (DirTrack == 35)
                 {
@@ -1705,7 +2267,7 @@ void FixBAM(vector<unsigned char> &DiskImage)
 
 bool OpenOutFile()
 {
-    if (OutputType == "png")
+    if ((OutputType == "png") || (OutputType == "gif"))
     {
         CreateDisk();           //PNG output - creating a virtual D64 first from the input file which will then be converted to PNG
     }
@@ -1849,7 +2411,7 @@ bool ImportFromD64()
         S = DA[DAPtr + 1];
     }
 
-    if (OutputType == "png")                //Copy BAM if the output is PNG
+    if ((OutputType == "png") || (OutputType == "gif"))                //Copy BAM if the output is PNG
     {
         for (int i = 4; i < 144; i++)
         {
@@ -3321,18 +3883,18 @@ void ShowInfo()
 
     cout << "Usage:\n";
     cout << "------\n";
-    cout << "dart input -o [output.d64/output.png] -n [\"disk name\"] -i [\"disk id\"] -s [skipped entries] -t [default entry type]\n";
+    cout << "dart input -o [output.d64/output.png/output.gif] -n [\"disk name\"] -i [\"disk id\"] -s [skipped entries] -t [default entry type]\n";
     cout << "           -f [first imported entry] - l [last imported entry]\n\n";
 
     cout << "input - the file from which the directory art will be imported. See accepted file types below.\n\n";
 
-    cout << "-o [output.d64/output.png] - the D64/PNG file to which the directory art will be imported. This parameter is optional\n";
-    cout << "       and it will be ignored if it is used with KickAss ASM input files that include the 'filename' disk parameter.\n";
-    cout << "       If an output is not specified then DART will create an input_out.d64 file. If the output file is a PNG then\n";
-    cout << "       DART will create a PNG \"screenshot\" of the directory listing instead of a D64 file. If there are less than 23\n";
-    cout << "       entries then the ouput PNG's size will be 384 x 272 pixels (same as a VICE screenshot). If there are at least\n";
-    cout << "       23 entries then the width will be 384 pixels and the height will be ((n + 4) * 8) + 72 pixels. The -s option\n";
-    cout << "       will be ignored if the output is PNG (you can't append entries to an existing PNG).\n\n";
+    cout << "-o [output.d64/output.png/output.gif] - the D64/PNG/GIF file to which the directory art will be imported. This\n";
+    cout << "       parameter is optional and it will be ignored if it is used with KickAss ASM input files that include the\n";
+    cout << "       'filename' disk parameter. If an output is not specified then DART will create an input_out.d64 file. If the\n";
+    cout << "       output file is a PNG or GIF then DART will create a PNG \"screenshot\" of the directory listing or an animated\n";
+    cout << "       GIF instead of a D64 file. If there are less than 23 entries then the ouput PNG's size will be 384 x 272 pixels\n";
+    cout << "       (same as a VICE screenshot). If there are at least 23 entries then the height will be ((n + 4) * 8) + 72 pixels.\n";
+    cout << "       The -s option will be ignored if the output is a PNG of GIF (you can't append entries to an existing PNG or GIF).\n\n";
         
     cout << "-n [\"disk name\"] - the output D64's disk name (left side of the topmost inverted row of the directory listing), max.\n";
     cout << "       16 characters. Wrap text in double quotes. This parameter is optional and it will be ignored if it is used\n";
@@ -3487,14 +4049,14 @@ int main(int argc, char* argv[])
     {
 
     #ifdef DEBUG
-        InFileName = "c:/dart/test/lmdf.d64";
-        OutFileName = "c:/dart/test/lmdf.png";
+        InFileName = "c:/dart/test/anim/cw.d64";
+        OutFileName = "c:/dart/test/anim/cw.gif";
         argSkippedEntries = "all";
         argEntryType = "del";
         //argPalette = "18";
     #else
         cout << "Usage: dart input [options]\n";
-        cout << "options:    -o <output.d64> or <output.png>\n";
+        cout << "options:    -o <output.d64> or <output.png> or <output.gif>\n";
         cout << "            -n <\"disk name\">\n";
         cout << "            -i <\"disk id\">\n";
         cout << "            -s <skipped entries in output.d64>\n";
@@ -3844,7 +4406,7 @@ int main(int argc, char* argv[])
         OutputType += tolower(OutFileName[i]);
     }
 
-    if ((OutputType != "png") && (OutputType != "d64"))
+    if ((OutputType != "png") && (OutputType != "gif") && (OutputType != "d64"))
     {
         cout << "***CRITICAL***\tUnrecognized output file type: " << OutFileName << "\n";
         return EXIT_FAILURE;
@@ -4005,7 +4567,16 @@ int main(int argc, char* argv[])
         }
         cout << "Done!\n";
     }
-
+    else if (OutputType == "gif")
+    {
+        cout << "Converting DirArt to GIF using palette No. " << C64PaletteNames[PaletteIdx];
+        if (!ConvertD64ToGif())
+        {
+            return EXIT_FAILURE;
+        }
+        cout << "Done!\n";
+    }
+    
     return EXIT_SUCCESS;
 }
     
