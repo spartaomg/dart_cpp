@@ -932,7 +932,7 @@ bool CreatePng()
     ImgWidth = 384;
 
 #ifdef AddBlockCount
-    ImgHeight = NumDirEntries > 21 ? (NumDirEntries * 8) + 8 + 72 : 272;
+    ImgHeight = NumDirEntries > 24 ? (NumDirEntries * 8) + 72 : 272;
 #elif
     ImgHeight = NumEntries > 24 ? (NumEntries * 8) + 8 + 72 : 272;
 #endif
@@ -1184,10 +1184,10 @@ bool ConvertD64ToGif()
 
     NumDirEntries = CalcNumEntries();
 
-    ScrRam.resize((size_t)(NumDirEntries + 4+6) * 80);    //80-char long virtual lines
-    ColRam.resize((size_t)(NumDirEntries + 4+6) * 80);
+    ScrRam.resize((size_t)(NumDirEntries + 4 + 8) * 80);    //80-char long virtual lines
+    ColRam.resize((size_t)(NumDirEntries + 4 + 8) * 80);
 
-    for (int i = 0; i < (NumDirEntries + 4 + 6) * 80; i++)
+    for (int i = 0; i < (NumDirEntries + 4 + 8) * 80; i++)
     {
         ScrRam[i] = 0x00;   //Unused Petscii code - indicates that the line is unused
         ColRam[i] = 0xff;   //Unused color code - no color change needed
@@ -1497,11 +1497,10 @@ bool ConvertD64ToGif()
         DrawChar(B, true);
     }
 
+    DrawChar(0x0d, true);
+
     CreateGifFrame();
     GifWriteFrame(&Gif, GifImage, GifWidth, GifHeight, 2);
-
-    CharX = 0;
-    CharY++;
 
     string ReadyMsg = "READY.";
 
@@ -1512,7 +1511,7 @@ bool ConvertD64ToGif()
     }
 #endif
 
-    DrawChar(0x0d);    //Instead of CharY ++
+    DrawChar(0x0d,true);    //Instead of CharY ++
 
     size_t Pos = (size_t)(CharY * 80) + CharX;
     B = ScrRam[Pos];
@@ -1754,9 +1753,10 @@ bool ConvertD64ToPng()
         B = BlocksFreeMsg[i];
         DrawChar(B, true);
     }
-
-    CharX = 0;
-    CharY++;
+    
+    DrawChar(0x0d, true);
+    //CharX = 0;
+    //CharY++;
 
     string ReadyMsg = "READY.";
 
@@ -1765,6 +1765,9 @@ bool ConvertD64ToPng()
         B = ReadyMsg[i];
         DrawChar(B, true);
     }
+
+    DrawChar(0x0d, true);
+
 #endif
 
     int RamSize = ColRam.size();
@@ -1778,6 +1781,12 @@ bool ConvertD64ToPng()
         ColRam.resize(RamSize);
         ScrRam.resize(RamSize);
     }
+
+
+#ifdef DEBUG
+    WriteBinaryFile("C:/Dart/Test/Anim/PngCol.bin", ColRam);
+    WriteBinaryFile("C:/Dart/Test/Anim/PngScr.bin", ScrRam);
+#endif
 
     return CreatePng();
 }
@@ -4049,8 +4058,8 @@ int main(int argc, char* argv[])
     {
 
     #ifdef DEBUG
-        InFileName = "c:/dart/test/anim/cw.d64";
-        OutFileName = "c:/dart/test/anim/cw.gif";
+        InFileName = "c:/dart/test/png_1bit.png";
+        OutFileName = "c:/dart/test/anim/png_1bit.gif";
         argSkippedEntries = "all";
         argEntryType = "del";
         //argPalette = "18";
