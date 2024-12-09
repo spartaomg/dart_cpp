@@ -503,7 +503,6 @@ void DrawGifChar(unsigned char Char, unsigned char Col, int GifX, int GifY)
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
-
 void DrawChar(unsigned char Char, unsigned char Col, int PngX, int PngY)
 {
     int Color = c64palettes[(PaletteIdx * 16) + ColorLtBlue];  //Default = light blue
@@ -536,8 +535,154 @@ void DrawChar(unsigned char Char, unsigned char Col, int PngX, int PngY)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
+/*
+void chrout(unsigned char ThisChar)
+{
+    if (ThisChar < 0x80)
+    {
+        //UNSHIFTED
 
-void DrawChar(unsigned char PChar, bool ConvertToPetscii = false, bool Invert = false)
+        if (ThisChar == 0x0d)
+        {
+        //OUTPUT <CR>
+        }
+        else if (ThisChar < 0x20)
+        {
+            if (NumInserts == 0)
+            {
+                if (ThisChar == 0x14)
+                {
+                    //OUTPUT <DELETE>
+                }
+                else
+                {
+                    if (QuotedText)
+                    {
+                        ThisChar |= 0x80;
+                        if (NumInserts > 0)
+                        {
+                            NumInserts--;
+                        }
+                        //OUTPUT TO SCREEN
+                    }
+                    else
+                    {
+                        //Not quoted text
+                        if (ThisChar == 0x12)
+                        {
+                            //Reverse On/Off
+                        }
+                        else if (ThisChar == 0x13)
+                        {
+                            //Home
+                        }
+                        else if (ThisChar == 0x1d)
+                        {
+                            //Crsr Right
+                        }
+                        else if (ThisChar == 0x11)
+                        {
+                            //
+                        }
+                        else if (ThisChar == 0x0e)
+                        {
+                            //D018 |= 0x02
+                        }
+                        else if (ThisChar == 0x8e)
+                        {
+                            //D018 &= 0xfd
+                        }
+                        else if (ThisChar == 0x08)
+                        {
+                            //Upper/lower case flag ON
+                        }
+                        else if (ThisChar == 0x09)
+                        {
+                            //Upper/lower case flag OFF
+                        }
+                        else
+                        {
+                            //color codes
+                            //0x90,0x05,0x1c,0x9f,0x9c,0x1e,0x1f,0x9e
+                            //0x81,0x95,0x96,0x97,0x98,0x99,0x9a,0x9b
+                        }
+                    }
+                }
+            }
+            else
+            {
+                //NumInserts > 0
+                ThisChar |= 0x80;
+                NumInserts--;
+                //OUTPUT TO SCREEN
+            }
+        }
+        else if (ThisChar < 0x60)
+        {
+            ThisChar &= 0x3f;
+            if (ThisChar == 0x22)
+            {
+                QuotedText = !QuotedText;
+            }
+            //OUTPUT TO SCREEN
+        }
+        else
+        {
+            ThisChar &= 0xdf;
+            if (ThisChar == 0x22)
+            {
+                QuotedText = !QuotedText;
+            }
+            //OUTPUT TO SCREEN
+        }
+    }
+    else
+    {
+        //SHIFTED
+        ThisChar &= 0x7f;
+        if (ThisChar == 0x7f)
+        {
+            ThisChar = 0x5e;
+        }
+        
+        if (ThisChar < 0x20)
+        {
+            if (ThisChar == 0x0d)
+            {
+                //OUTPUT <CR>
+            }
+            else if (!QuotedText)
+            {
+                if (ThisChar == 0x14)
+                {
+                }
+                else
+                {
+                    if (NumInserts > 0)
+                    {
+                        ThisChar |= 0x40;
+                        //SET UP SCREEN PRINT
+                    }
+                    else
+                    {
+                    //$e832
+                    }
+                }
+            }
+        
+        }
+        else
+        {
+        //SET UP SCREEN PRINT
+        }
+
+    }
+}
+*/
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+void ChrOut(unsigned char PChar, bool ConvertToPetscii = false, bool Invert = false)
 {
 
     if (!QuotedText)
@@ -667,6 +812,16 @@ void DrawChar(unsigned char PChar, bool ConvertToPetscii = false, bool Invert = 
         else if (PChar == 0x92)     //REVERSE OFF
         {
             InvertedText = false;
+            return;
+        }
+        else if (PChar == 0x08)
+        {
+            CharSetSwitchEnabled = false;
+            return;
+        }
+        else if (PChar == 0x09)
+        {
+            CharSetSwitchEnabled = true;
             return;
         }
         else if ((PChar == 0x0e) && (CharSetSwitchEnabled))     //LOWER CASE CHARSET
@@ -813,16 +968,6 @@ void DrawChar(unsigned char PChar, bool ConvertToPetscii = false, bool Invert = 
             ColRam[CharY * 80] = CurrentColor;
         }
 
-        return;
-    }
-    else if (PChar == 0x08)
-    {
-        CharSetSwitchEnabled = false;
-        return;
-    }
-    else if (PChar == 0x09)
-    {
-        CharSetSwitchEnabled = true;
         return;
     }
     else if ((PChar == 0xa0) && (!HeaderText))      //END OF DIR ENTRY
@@ -1202,10 +1347,10 @@ bool ConvertD64ToGif()
     for (size_t i = 0; i < S.length(); i++)
     {
         B = S[i];
-        DrawChar(B, true);
+        ChrOut(B, true);
     }
 
-    DrawChar(0x0d);    //Instead of CharY ++
+    ChrOut(0x0d);    //Instead of CharY ++
 
     //   01234567890123456789012345678901234567890123456789012345678901234567890123456789
     S = "                                         64K RAM SYSTEM  38911 BASIC BYTES FREE";
@@ -1213,10 +1358,10 @@ bool ConvertD64ToGif()
     for (size_t i = 0; i < S.length(); i++)
     {
         B = S[i];
-        DrawChar(B, true);
+        ChrOut(B, true);
     }
 
-    DrawChar(0x0d);    //Instead of CharY ++
+    ChrOut(0x0d);    //Instead of CharY ++
 
     //   01234567890123456789012345678901234567890123456789012345678901234567890123456789
     S = "                                        READY";
@@ -1224,10 +1369,10 @@ bool ConvertD64ToGif()
     for (size_t i = 0; i < S.length(); i++)
     {
         B = S[i];
-        DrawChar(B, true);
+        ChrOut(B, true);
     }
 
-    DrawChar(0x0d);    //Instead of CharY ++
+    ChrOut(0x0d);    //Instead of CharY ++
 
     //   01234567890123456789012345678901234567890123456789012345678901234567890123456789
     S = "LOAD\"$\",8";
@@ -1235,10 +1380,10 @@ bool ConvertD64ToGif()
     for (size_t i = 0; i < S.length(); i++)
     {
         B = S[i];
-        DrawChar(B, true);
+        ChrOut(B, true);
     }
 
-    DrawChar(0x0d);    //Instead of CharY ++
+    ChrOut(0x0d);    //Instead of CharY ++
 
     //   01234567890123456789012345678901234567890123456789012345678901234567890123456789
     S = "                                        SEARCHING FOR $";
@@ -1246,10 +1391,10 @@ bool ConvertD64ToGif()
     for (size_t i = 0; i < S.length(); i++)
     {
         B = S[i];
-        DrawChar(B, true);
+        ChrOut(B, true);
     }
 
-    DrawChar(0x0d);    //Instead of CharY ++
+    ChrOut(0x0d);    //Instead of CharY ++
 
     //   01234567890123456789012345678901234567890123456789012345678901234567890123456789
     S = "LOADING                                 READY";
@@ -1257,10 +1402,10 @@ bool ConvertD64ToGif()
     for (size_t i = 0; i < S.length(); i++)
     {
         B = S[i];
-        DrawChar(B, true);
+        ChrOut(B, true);
     }
 
-    DrawChar(0x0d);    //Instead of CharY ++
+    ChrOut(0x0d);    //Instead of CharY ++
 
     //   01234567890123456789012345678901234567890123456789012345678901234567890123456789
     S = "LIST";
@@ -1268,21 +1413,21 @@ bool ConvertD64ToGif()
     for (size_t i = 0; i < S.length(); i++)
     {
         B = S[i];
-        DrawChar(B, true);
+        ChrOut(B, true);
     }
 
     for (int i = 0; i < 2; i++)
     {
 
         InvertedText = true;
-        DrawChar(0x20, true);
+        ChrOut(0x20, true);
 
         CreateGifFrame();
         GifWriteFrame(&Gif, GifImage, GifWidth, GifHeight, 50);
 
         CharX--;
         InvertedText = false;
-        DrawChar(0x20, true);
+        ChrOut(0x20, true);
 
         CreateGifFrame();
         GifWriteFrame(&Gif, GifImage, GifWidth, GifHeight, 50);
@@ -1290,8 +1435,8 @@ bool ConvertD64ToGif()
         CharX--;
     }
 
-    DrawChar(0x0d);    //Instead of CharY ++
-    DrawChar(0x0d);    //Instead of CharY ++
+    ChrOut(0x0d);    //Instead of CharY ++
+    ChrOut(0x0d);    //Instead of CharY ++
 
     CreateGifFrame();
     GifWriteFrame(&Gif, GifImage, GifWidth, GifHeight, 2);
@@ -1300,22 +1445,22 @@ bool ConvertD64ToGif()
     DirSector = 1;
     DirPos = 2;
 
-    DrawChar(0x30);
-    DrawChar(0x20);
+    ChrOut(0x30);
+    ChrOut(0x20);
 
     HeaderText = true;
-    DrawChar(0x22, false, true);
+    ChrOut(0x22, false, true);
     QuotedText = true;
 
     for (int i = 0; i < 16; i++)
     {
         B = Disk[Track[DirTrack] + 0x90 + i];
-        DrawChar(B, true, true);
+        ChrOut(B, true, true);
     }
 
-    DrawChar(0x22, false, true);
+    ChrOut(0x22, false, true);
     QuotedText = false;
-    DrawChar(0x20, false, true);
+    ChrOut(0x20, false, true);
 
     CreateGifFrame();
     GifWriteFrame(&Gif, GifImage, GifWidth, GifHeight, 2);
@@ -1327,12 +1472,12 @@ bool ConvertD64ToGif()
         {
             B = 0x31;   //if the 5th character is 0xa0 then the C64 displays a "1" instead
         }
-        DrawChar(B, true, true);
+        ChrOut(B, true, true);
     }
 
     HeaderText = false;
 
-    DrawChar(0x0d);    //Instead of CharY ++
+    ChrOut(0x0d);    //Instead of CharY ++
 
     DirTrack = 18;
     DirSector = 1;
@@ -1408,15 +1553,15 @@ bool ConvertD64ToGif()
 
             for (size_t i = 0; i < BlockCnt.size(); i++)
             {
-                DrawChar(BlockCnt[i]);
+                ChrOut(BlockCnt[i]);
             }
 
             for (size_t i = 5; i > BlockCnt.size(); i--)
             {
-                DrawChar(0x20);
+                ChrOut(0x20);
             }
 
-            DrawChar(0x22);
+            ChrOut(0x22);
             QuotedText = true;
 
             NumExtraSpaces = 0;
@@ -1424,24 +1569,24 @@ bool ConvertD64ToGif()
             for (int i = 0; i < 16; i++)
             {
                 unsigned char NextChar = Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i];
-                DrawChar(NextChar, true);
+                ChrOut(NextChar, true);
             }
 
-            DrawChar(0x22);
+            ChrOut(0x22);
             QuotedText = false;
 
             for (int i = 0; i < NumExtraSpaces; i++)
             {
-                DrawChar(0x20);
+                ChrOut(0x20);
             }
 
             for (size_t i = 0; i < EntryType.length(); i++)
             {
                 B = EntryType[i];
-                DrawChar(B, true);
+                ChrOut(B, true);
             }
 
-            DrawChar(0x0d);     //CharY ++;
+            ChrOut(0x0d);     //CharY ++;
 
             //CharX = 0;
         }
@@ -1486,7 +1631,7 @@ bool ConvertD64ToGif()
 
     for (size_t i = 0; i < BlocksFree.size(); i++)
     {
-        DrawChar(BlocksFree[i]);
+        ChrOut(BlocksFree[i]);
     }
 
     string BlocksFreeMsg = " BLOCKS FREE.";
@@ -1494,10 +1639,10 @@ bool ConvertD64ToGif()
     for (size_t i = 0; i < BlocksFreeMsg.length(); i++)
     {
         B = BlocksFreeMsg[i];
-        DrawChar(B, true);
+        ChrOut(B, true);
     }
 
-    DrawChar(0x0d, true);
+    ChrOut(0x0d, true);
 
     CreateGifFrame();
     GifWriteFrame(&Gif, GifImage, GifWidth, GifHeight, 2);
@@ -1507,11 +1652,11 @@ bool ConvertD64ToGif()
     for (size_t i = 0; i < ReadyMsg.length(); i++)
     {
         B = ReadyMsg[i];
-        DrawChar(B, true);
+        ChrOut(B, true);
     }
 #endif
 
-    DrawChar(0x0d,true);    //Instead of CharY ++
+    ChrOut(0x0d,true);    //Instead of CharY ++
 
     size_t Pos = (size_t)(CharY * 80) + CharX;
     B = ScrRam[Pos];
@@ -1562,23 +1707,23 @@ bool ConvertD64ToPng()
     DirSector = 1;
     DirPos = 2;
 
-    DrawChar(0x30);
-    DrawChar(0x20);
+    ChrOut(0x30);
+    ChrOut(0x20);
 
     HeaderText = true;
-    DrawChar(0x22, false, true);
+    ChrOut(0x22, false, true);
     QuotedText = true;
 
     unsigned int B = 0;
     for (int i = 0; i < 16; i++)
     {
         B = Disk[Track[DirTrack] + 0x90 + i];
-        DrawChar(B, true, true);
+        ChrOut(B, true, true);
     }
 
-    DrawChar(0x22, false, true);
+    ChrOut(0x22, false, true);
     QuotedText = false;
-    DrawChar(0x20, false, true);
+    ChrOut(0x20, false, true);
 
     for (int i = 0; i < 5; i++)
     {
@@ -1587,12 +1732,12 @@ bool ConvertD64ToPng()
         {
             B = 0x31;   //if the 5th character is 0xa0 then the C64 displays a "1" instead
         }
-        DrawChar(B, true, true);
+        ChrOut(B, true, true);
     }
 
     HeaderText = false;
 
-    DrawChar(0x0d);    //Instead of CharY ++
+    ChrOut(0x0d);    //Instead of CharY ++
 
     DirTrack = 18;
     DirSector = 1;
@@ -1668,15 +1813,15 @@ bool ConvertD64ToPng()
             
             for (size_t i = 0; i < BlockCnt.size(); i++)
             {
-                DrawChar(BlockCnt[i]);
+                ChrOut(BlockCnt[i]);
             }
 
             for (size_t i = 5; i > BlockCnt.size(); i--)
             {
-                DrawChar(0x20);
+                ChrOut(0x20);
             }
 
-            DrawChar(0x22);
+            ChrOut(0x22);
             QuotedText = true;
             
             NumExtraSpaces = 0;
@@ -1684,24 +1829,24 @@ bool ConvertD64ToPng()
             for (int i = 0; i < 16; i++)
             {
                 unsigned char NextChar = Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i];
-                DrawChar(NextChar, true);
+                ChrOut(NextChar, true);
             }
 
-            DrawChar(0x22);
+            ChrOut(0x22);
             QuotedText = false;
 
             for (int i = 0; i < NumExtraSpaces; i++)
             {
-                DrawChar(0x20);
+                ChrOut(0x20);
             }
 
             for (size_t i = 0; i < EntryType.length(); i++)
             {
                 B = EntryType[i];
-                DrawChar(B, true);
+                ChrOut(B, true);
             }
 
-            DrawChar(0x0d);     //CharY ++;
+            ChrOut(0x0d);     //CharY ++;
             
             //CharX = 0;
         }
@@ -1743,7 +1888,7 @@ bool ConvertD64ToPng()
     
     for (size_t i = 0; i < BlocksFree.size(); i++)
     {
-        DrawChar(BlocksFree[i]);
+        ChrOut(BlocksFree[i]);
     }
     
     string BlocksFreeMsg = " BLOCKS FREE.";
@@ -1751,10 +1896,10 @@ bool ConvertD64ToPng()
     for (size_t i = 0; i < BlocksFreeMsg.length(); i++)
     {
         B = BlocksFreeMsg[i];
-        DrawChar(B, true);
+        ChrOut(B, true);
     }
     
-    DrawChar(0x0d, true);
+    ChrOut(0x0d, true);
     //CharX = 0;
     //CharY++;
 
@@ -1763,10 +1908,10 @@ bool ConvertD64ToPng()
     for (size_t i = 0; i < ReadyMsg.length(); i++)
     {
         B = ReadyMsg[i];
-        DrawChar(B, true);
+        ChrOut(B, true);
     }
 
-    DrawChar(0x0d, true);
+    ChrOut(0x0d, true);
 
 #endif
 
@@ -4058,8 +4203,8 @@ int main(int argc, char* argv[])
     {
 
     #ifdef DEBUG
-        InFileName = "c:/dart/test/png_1bit.png";
-        OutFileName = "c:/dart/test/anim/png_1bit.gif";
+        InFileName = "c:/dart/test/art1.c";
+        OutFileName = "c:/dart/test/output/art1.png";
         argSkippedEntries = "all";
         argEntryType = "del";
         //argPalette = "18";
