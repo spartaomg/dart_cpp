@@ -114,6 +114,13 @@ int ScreenTop = 35;
 int CharX = 0;  //ScreenLeft;
 int CharY = 0;  //ScreenTop;
 
+size_t ScrLeft = 0;
+size_t ScrTop = 0;
+size_t ScrWidth = 0;
+size_t ScrHeight = 0;
+
+bool HasBorders = false;
+
 int NumDirEntries = 0;
 #ifdef DEBUG
     int ThisDirEntry = 0;
@@ -122,7 +129,7 @@ int NumDirEntries = 0;
 unsigned char CurrentColor = 0x0e;      //We start with light blue
 
 bool QuotedText = false;
-bool HeaderText = true;
+//bool HeaderText = true;
 bool InvertedText = false;
 int CharSet = 0;                        //Upper case = 0, lower case = 1
 
@@ -535,16 +542,162 @@ void DrawChar(unsigned char Char, unsigned char Col, int PngX, int PngY)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
-/*
+
+void OutputDel()
+{
+    if (CharX > 0)
+    {
+        CharX--;
+        for (size_t x = CharX; x < 78; x++)
+        {
+            ScrRam[(size_t)(CharY * 80) + x] = ScrRam[(size_t)(CharY * 80) + x + 1];
+            ColRam[(size_t)(CharY * 80) + x] = ColRam[(size_t)(CharY * 80) + x + 1];
+        }
+        ScrRam[(size_t)(CharY * 80) + 79] = 0x00;
+        ColRam[(size_t)(CharY * 80) + 79] = 0xff;
+    }
+    else
+    {
+        CharY--;
+        if (ScrRam[(size_t)(CharY * 80) + 40] != 0x00)
+        {
+            CharX = 79;
+        }
+        else
+        {
+            CharX = 39;
+        }
+        ScrRam[(size_t)(CharY * 80) + CharX] = 0x00;
+        ColRam[(size_t)(CharY * 80) + CharX] = 0xff;
+    }
+    return;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+void OutputCR()
+{
+    NumInserts = 0;
+    QuotedText = false;
+    //HeaderText = false;
+    InvertedText = false;
+    CharX = 0;
+    CharY++;
+
+    if (ColRam[(size_t)CharY * 80] == 0xff)
+    {
+        ScrRam[(size_t)CharY * 80] = 0x20;
+        ColRam[(size_t)CharY * 80] = CurrentColor;
+    }
+
+    return;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+void OutputInsert()
+{
+    if ((CharX != 79) && ((ScrRam[(size_t)(CharY * 80) + 79] == 0x20) || (ScrRam[(size_t)(CharY * 80) + 79] == 0x00)))  //Last char of double line is space and we are not on the last char
+    {
+        NumInserts++;   //count number of inserts
+
+        int MaxX = 38;
+        if ((ScrRam[(size_t)(CharY * 80) + 40] != 0x00) || ((ScrRam[(size_t)(CharY * 80) + 39] != 0x00) && (ScrRam[(size_t)(CharY * 80) + 39] != 0x20)))
+        {
+            MaxX = 78;
+        }
+
+        for (int x = MaxX; x >= CharX; x--)
+        {
+            ScrRam[(size_t)(CharY * 80) + x + 1] = ScrRam[(size_t)(CharY * 80) + x];
+            ColRam[(size_t)(CharY * 80) + x + 1] = ColRam[(size_t)(CharY * 80) + x];
+        }
+
+        ScrRam[(size_t)(CharY * 80) + CharX] = 0x20;
+        ColRam[(size_t)(CharY * 80) + CharX] = CurrentColor;
+
+        //If we just pushed the last (non-space) char of the first halfline to the first pos in the second halfline then fill the rest of the second half line with space  
+        if ((ScrRam[(size_t)(CharY * 80) + 40] != 0x00) && (ScrRam[(size_t)(CharY * 80) + 41] == 0x00))
+        {
+            for (int i = 41; i < 80; i++)
+            {
+                ScrRam[(size_t)(CharY * 80) + i] = 0x20;
+                ColRam[(size_t)(CharY * 80) + i] = 0x0e;    //c64palettes[(PaletteIdx * 16) + 0x0e]; //light blue
+            }
+        }
+    }
+    return;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+void OutputToScreen(unsigned char ThisChar)
+{
+
+    size_t Pos = (size_t)(CharY * 80) + CharX;
+
+    if (Pos >= ScrRam.size())
+    {
+        ScrRam.resize((size_t)(CharY + 1) * 80);
+        ColRam.resize((size_t)(CharY + 1) * 80);
+
+        for (size_t i = ScrRam.size() - 80; i < ScrRam.size(); i++)
+        {
+            ScrRam[i] = 0x00;
+            ColRam[i] = 0xff;
+        }
+    }
+
+    //If this will be the first char in the second halfline, then fill halfline with space to mark it
+    if (CharX >= 40)
+    {
+        if (ScrRam[(size_t)(CharY * 80) + 40] == 0x00)
+        {
+            for (int i = 40; i < 80; i++)
+            {
+                ScrRam[(size_t)(CharY * 80) + i] = 0x20;
+            }
+        }
+    }
+    else
+    {
+        if (ScrRam[(size_t)(CharY * 80)] == 0x00)
+        {
+            for (int i = 00; i < 40; i++)
+            {
+                ScrRam[(size_t)(CharY * 80) + i] = 0x20;
+            }
+        }
+    }
+
+    ScrRam[Pos] = ThisChar;
+    ColRam[Pos] = CurrentColor;
+
+    CharX++;
+
+    if (CharX == 80)
+    {
+        CharX = 0;
+        CharY++;
+    }
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
 void chrout(unsigned char ThisChar)
 {
+    //Direct implementation of the KERNAL CHROUT routine
+    
     if (ThisChar < 0x80)
     {
+        //---------------------------------------------
         //UNSHIFTED
+        //---------------------------------------------
 
         if (ThisChar == 0x0d)
         {
-        //OUTPUT <CR>
+            OutputCR();
+            return;
         }
         else if (ThisChar < 0x20)
         {
@@ -552,7 +705,8 @@ void chrout(unsigned char ThisChar)
             {
                 if (ThisChar == 0x14)
                 {
-                    //OUTPUT <DELETE>
+                    OutputDel();
+                    return;
                 }
                 else
                 {
@@ -563,45 +717,110 @@ void chrout(unsigned char ThisChar)
                         {
                             NumInserts--;
                         }
+                        
                         //OUTPUT TO SCREEN
+                        OutputToScreen(ThisChar);
+                        return;
                     }
                     else
                     {
                         //Not quoted text
                         if (ThisChar == 0x12)
                         {
-                            //Reverse On/Off
+                            InvertedText = true;
+                            return;
                         }
                         else if (ThisChar == 0x13)
                         {
                             //Home
+                            CharX = 0;
+                            CharY = 0;
+                            return;
                         }
                         else if (ThisChar == 0x1d)
                         {
                             //Crsr Right
+                            CharX++;
+                            if (CharX == 40)
+                            {
+                                if (ScrRam[(size_t)(CharY * 80) + CharX] == 0x00)
+                                {
+                                    CharX = 0;
+                                    CharY++;
+                                }
+                            }
+                            return;
                         }
                         else if (ThisChar == 0x11)
                         {
-                            //
+                            //Crsr down -> check if this is a double line, if yes step to next half otherwise step to next line          
+                            CharX += 40;
+
+                            if (CharX >= 80)        //First half line
+                            {
+                                CharX -= 80;
+                                CharY++;
+                            }
+                            else
+                            {
+                                if (ScrRam[(size_t)(CharY * 80) + 40] == 0x00)  //Second half line - check if empty and step to next first half line if it is empty
+                                {
+                                    CharX -= 40;
+                                    CharY++;
+                                }
+                            }
+
+                            if (ColRam[CharY * 80] == 0xff)
+                            {
+                                ScrRam[CharY * 80] = 0x20;
+                                ColRam[CharY * 80] = CurrentColor;
+                            }
+
+                            return;
                         }
                         else if (ThisChar == 0x0e)
                         {
                             //D018 |= 0x02
-                        }
-                        else if (ThisChar == 0x8e)
-                        {
-                            //D018 &= 0xfd
+                            if (CharSetSwitchEnabled)
+                            {
+                                CharSet = 1;
+                                return;
+                            }
                         }
                         else if (ThisChar == 0x08)
                         {
-                            //Upper/lower case flag ON
+                            //Upper/lower case flag OFF
+                            CharSetSwitchEnabled = false;
+                            return;
                         }
                         else if (ThisChar == 0x09)
                         {
-                            //Upper/lower case flag OFF
+                            //Upper/lower case flag ON
+                            CharSetSwitchEnabled = true;
+                            return;
                         }
                         else
                         {
+                            if (ThisChar == 0x05)
+                            {
+                                CurrentColor = ColorWhite;
+                                return;
+                            }
+                            else if (ThisChar == 0x1c)
+                            {
+                                CurrentColor = ColorRed;
+                                return;
+                            }
+                            else if (ThisChar == 0x1e)
+                            {
+                                CurrentColor = ColorGreen;
+                                return;
+                            }
+                            else if (ThisChar == 0x1f)
+                            {
+                                CurrentColor = ColorBlue;
+                                return;
+                            }
                             //color codes
                             //0x90,0x05,0x1c,0x9f,0x9c,0x1e,0x1f,0x9e
                             //0x81,0x95,0x96,0x97,0x98,0x99,0x9a,0x9b
@@ -615,31 +834,48 @@ void chrout(unsigned char ThisChar)
                 ThisChar |= 0x80;
                 NumInserts--;
                 //OUTPUT TO SCREEN
+                OutputToScreen(ThisChar);
+                return;
             }
-        }
-        else if (ThisChar < 0x60)
-        {
-            ThisChar &= 0x3f;
-            if (ThisChar == 0x22)
-            {
-                QuotedText = !QuotedText;
-            }
-            //OUTPUT TO SCREEN
         }
         else
         {
-            ThisChar &= 0xdf;
+
+            if (ThisChar < 0x60)
+            {
+                ThisChar &= 0x3f;
+            }
+            else
+            {
+                ThisChar &= 0xdf;
+            }
+
             if (ThisChar == 0x22)
             {
                 QuotedText = !QuotedText;
             }
-            //OUTPUT TO SCREEN
+
+           //OUTPUT TO SCREEN
+            if (InvertedText)
+            {
+                ThisChar |= 0x80;
+            }
+            if (NumInserts > 0)
+            {
+                NumInserts--;
+            }
+            OutputToScreen(ThisChar);
+            return;
         }
     }
     else
     {
+        //---------------------------------------------
         //SHIFTED
+        //---------------------------------------------
+
         ThisChar &= 0x7f;
+
         if (ThisChar == 0x7f)
         {
             ThisChar = 0x5e;
@@ -649,39 +885,190 @@ void chrout(unsigned char ThisChar)
         {
             if (ThisChar == 0x0d)
             {
-                //OUTPUT <CR>
+                //0x8d
+                OutputCR();
+                return;
             }
-            else if (!QuotedText)
+            else
             {
-                if (ThisChar == 0x14)
+                if (!QuotedText)
                 {
-                }
-                else
-                {
-                    if (NumInserts > 0)
+                    if (ThisChar == 0x14)
                     {
-                        ThisChar |= 0x40;
-                        //SET UP SCREEN PRINT
+                        //0x94 - INSERT
+                        OutputInsert();
+                        return;
                     }
                     else
                     {
-                    //$e832
+                        if (NumInserts > 0)
+                        {
+                            ThisChar |= 0xC0;
+
+                            if (NumInserts > 0)
+                            {
+                                NumInserts--;
+                            }
+
+                            //OUTPUT TO SCREEN
+                            OutputToScreen(ThisChar);
+                            return;
+                        }
+                        else
+                        {
+                            if (ThisChar == 0x11)
+                            {
+                                //0x91 - cursor UP
+                                if (CharX >= 40)        //Bug fix based on the dir art of Desp-AI-r.d64
+                                {
+                                    CharX -= 40;
+                                }
+                                else if (CharY > 0)
+                                {
+                                    CharY--;
+                                    if (ScrRam[(size_t)(CharY * 80) + 40] != 00)
+                                    {
+                                        CharX += 40;
+                                    }
+                                }
+                                return;
+                            }
+                            else if (ThisChar == 0x12)
+                            {
+                                //0x92
+                                InvertedText = false;
+                                return;
+                            }
+                            else if (ThisChar == 0x1d)
+                            {
+                                //0x9d - cursor left
+                                CharX--;
+                                if (CharX < 0)
+                                {
+                                    if (CharY == 0)
+                                    {
+                                        CharX = 0;
+                                        return;
+                                    }
+                                    else
+                                    {
+                                        CharY--;
+                                        if (ScrRam[(size_t)(CharY * 80) + 40] == 0x00)
+                                        {
+                                            CharX = 39;
+                                        }
+                                        else
+                                        {
+                                            CharX = 79;
+                                        }
+                                    }
+                                }
+                                return;
+                            }
+                            else if (ThisChar == 0x13)
+                            {
+                                //0x93 - clear screen
+                                CharX = 0;
+                                CharY = 0;
+                                for (size_t i = 0; i < ScrRam.size(); i++)
+                                {
+                                    ScrRam[i] = 0x00;
+                                    ColRam[i] = 0xff;
+                                }
+                                return;
+                            }
+                            else
+                            {
+                                ThisChar |= 0x80;
+
+                                if (ThisChar == 0x90)
+                                {
+                                    CurrentColor = ColorBlack;
+                                    return;
+                                }
+                                else if (ThisChar == 0x9f)
+                                {
+                                    CurrentColor = ColorCyan;
+                                    return;
+                                }
+                                else if (ThisChar == 0x9c)
+                                {
+                                    CurrentColor = ColorPurple;
+                                    return;
+                                }
+                                else if (ThisChar == 0x9e)
+                                {
+                                    CurrentColor = ColorYellow;
+                                    return;
+                                }
+                                else if (ThisChar == 0x81)
+                                {
+                                    CurrentColor = ColorOrange;
+                                    return;
+                                }
+                                else if ((ThisChar >= 0x95) && (ThisChar <= 0x9b))
+                                {
+                                    CurrentColor = ThisChar - 0x8c;
+                                    return;
+                                }
+                                //color codes
+                                //0x90,0x05,0x1c,0x9f,0x9c,0x1e,0x1f,0x9e
+                                //0x81,0x95,0x96,0x97,0x98,0x99,0x9a,0x9b
+
+                                if (ThisChar == 0x8e)
+                                {
+                                    //D018 &= 0xfd
+                                    if (CharSetSwitchEnabled)
+                                    {
+                                        CharSet = 0;
+                                        return;
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
-            }
-        
+                else
+                {
+                    //SET UP SCREEN PRINT - $E691
+                    ThisChar |= 0xc0;
+
+                    if (NumInserts > 0)
+                    {
+                        NumInserts--;
+                    }
+
+                    OutputToScreen(ThisChar);
+                    return;
+
+                }
+            }        
         }
         else
         {
-        //SET UP SCREEN PRINT
+            //SET UP SCREEN PRINT - $E691
+            ThisChar |= 0x40;
+
+            if (InvertedText)
+            {
+                ThisChar |= 0x80;
+            }
+
+            if (NumInserts > 0)
+            {
+                NumInserts--;
+            }
+
+            OutputToScreen(ThisChar);
+            return;
         }
 
     }
 }
-*/
+
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
-
+/*
 void ChrOut(unsigned char PChar, bool ConvertToPetscii = false, bool Invert = false)
 {
 
@@ -717,8 +1104,8 @@ void ChrOut(unsigned char PChar, bool ConvertToPetscii = false, bool Invert = fa
                         ColRam[(size_t)(CharY * 80) + i] = c64palettes[(PaletteIdx * 16) + 0x0e]; //light blue
                     }
                 }
-                return;
             }
+            return;
         }
     }
 
@@ -907,7 +1294,7 @@ void ChrOut(unsigned char PChar, bool ConvertToPetscii = false, bool Invert = fa
                 }
             }
             return;
-            }
+        }
         else if (PChar == 0x9d)     //CURSOR LEFT
         {
             CharX--;
@@ -1043,7 +1430,7 @@ void ChrOut(unsigned char PChar, bool ConvertToPetscii = false, bool Invert = fa
     }
 
 }
-
+*/
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
 bool CreatePng()
@@ -1207,11 +1594,11 @@ int CalcNumEntries()
 void CreateGifFrame()
 {
     size_t FirstEntryPos = 0;
-    size_t LastEntryPos = ColRam.size();
+    size_t LastEntryPos = ScrRam.size();
 
-    for (size_t i = ColRam.size(); i >= 40; i -= 40)
+    for (size_t i = ScrRam.size(); i >= 40; i -= 40)
     {
-        if (ColRam[i - 40] != 0xff)
+        if (ScrRam[i - 40] != 0x00)
         {
             LastEntryPos = i;
             break;
@@ -1222,7 +1609,7 @@ void CreateGifFrame()
 
     for (size_t i = 0; i < LastEntryPos; i += 40)
     {
-        if ((ColRam[i] != 0xff) || (i % 80 == 0))
+        if ((ScrRam[i] != 0x00) || (i % 80 == 0))
         {
             NumDirEntries++;
         }
@@ -1231,7 +1618,7 @@ void CreateGifFrame()
 
     for (size_t i = LastEntryPos; i >= 40; i -= 40)
     {
-        if ((ColRam[i - 40] != 0xff) || ((i - 40) % 80 == 0))
+        if ((ScrRam[i - 40] != 0x00) || ((i - 40) % 80 == 0))
         {
             NumEntries++;
             if (NumEntries == 25)
@@ -1347,10 +1734,10 @@ bool ConvertD64ToGif()
     for (size_t i = 0; i < S.length(); i++)
     {
         B = S[i];
-        ChrOut(B, true);
+        chrout(B);
     }
 
-    ChrOut(0x0d);    //Instead of CharY ++
+    chrout(0x0d);
 
     //   01234567890123456789012345678901234567890123456789012345678901234567890123456789
     S = "                                         64K RAM SYSTEM  38911 BASIC BYTES FREE";
@@ -1358,10 +1745,10 @@ bool ConvertD64ToGif()
     for (size_t i = 0; i < S.length(); i++)
     {
         B = S[i];
-        ChrOut(B, true);
+        chrout(B);
     }
 
-    ChrOut(0x0d);    //Instead of CharY ++
+    chrout(0x0d);
 
     //   01234567890123456789012345678901234567890123456789012345678901234567890123456789
     S = "                                        READY";
@@ -1369,10 +1756,10 @@ bool ConvertD64ToGif()
     for (size_t i = 0; i < S.length(); i++)
     {
         B = S[i];
-        ChrOut(B, true);
+        chrout(B);
     }
 
-    ChrOut(0x0d);    //Instead of CharY ++
+    chrout(0x0d);
 
     //   01234567890123456789012345678901234567890123456789012345678901234567890123456789
     S = "LOAD\"$\",8";
@@ -1380,10 +1767,10 @@ bool ConvertD64ToGif()
     for (size_t i = 0; i < S.length(); i++)
     {
         B = S[i];
-        ChrOut(B, true);
+        chrout(B);
     }
 
-    ChrOut(0x0d);    //Instead of CharY ++
+    chrout(0x0d);
 
     //   01234567890123456789012345678901234567890123456789012345678901234567890123456789
     S = "                                        SEARCHING FOR $";
@@ -1391,10 +1778,10 @@ bool ConvertD64ToGif()
     for (size_t i = 0; i < S.length(); i++)
     {
         B = S[i];
-        ChrOut(B, true);
+        chrout(B);
     }
 
-    ChrOut(0x0d);    //Instead of CharY ++
+    chrout(0x0d);
 
     //   01234567890123456789012345678901234567890123456789012345678901234567890123456789
     S = "LOADING                                 READY";
@@ -1402,10 +1789,10 @@ bool ConvertD64ToGif()
     for (size_t i = 0; i < S.length(); i++)
     {
         B = S[i];
-        ChrOut(B, true);
+        chrout(B);
     }
 
-    ChrOut(0x0d);    //Instead of CharY ++
+    chrout(0x0d);
 
     //   01234567890123456789012345678901234567890123456789012345678901234567890123456789
     S = "LIST";
@@ -1413,21 +1800,21 @@ bool ConvertD64ToGif()
     for (size_t i = 0; i < S.length(); i++)
     {
         B = S[i];
-        ChrOut(B, true);
+        chrout(B);
     }
 
     for (int i = 0; i < 2; i++)
     {
 
         InvertedText = true;
-        ChrOut(0x20, true);
+        chrout(0x20);
 
         CreateGifFrame();
         GifWriteFrame(&Gif, GifImage, GifWidth, GifHeight, 50);
 
         CharX--;
         InvertedText = false;
-        ChrOut(0x20, true);
+        chrout(0x20);
 
         CreateGifFrame();
         GifWriteFrame(&Gif, GifImage, GifWidth, GifHeight, 50);
@@ -1435,8 +1822,8 @@ bool ConvertD64ToGif()
         CharX--;
     }
 
-    ChrOut(0x0d);    //Instead of CharY ++
-    ChrOut(0x0d);    //Instead of CharY ++
+    chrout(0x0d);
+    chrout(0x0d);
 
     CreateGifFrame();
     GifWriteFrame(&Gif, GifImage, GifWidth, GifHeight, 2);
@@ -1445,22 +1832,20 @@ bool ConvertD64ToGif()
     DirSector = 1;
     DirPos = 2;
 
-    ChrOut(0x30);
-    ChrOut(0x20);
+    chrout(0x30);
+    chrout(0x20);
 
-    HeaderText = true;
-    ChrOut(0x22, false, true);
-    QuotedText = true;
+    InvertedText = true;
+    chrout(0x22);
 
     for (int i = 0; i < 16; i++)
     {
         B = Disk[Track[DirTrack] + 0x90 + i];
-        ChrOut(B, true, true);
+        chrout(B);
     }
 
-    ChrOut(0x22, false, true);
-    QuotedText = false;
-    ChrOut(0x20, false, true);
+    chrout(0x22);
+    chrout(0x20);
 
     CreateGifFrame();
     GifWriteFrame(&Gif, GifImage, GifWidth, GifHeight, 2);
@@ -1472,12 +1857,10 @@ bool ConvertD64ToGif()
         {
             B = 0x31;   //if the 5th character is 0xa0 then the C64 displays a "1" instead
         }
-        ChrOut(B, true, true);
+        chrout(B);
     }
 
-    HeaderText = false;
-
-    ChrOut(0x0d);    //Instead of CharY ++
+    chrout(0x0d);
 
     DirTrack = 18;
     DirSector = 1;
@@ -1553,42 +1936,46 @@ bool ConvertD64ToGif()
 
             for (size_t i = 0; i < BlockCnt.size(); i++)
             {
-                ChrOut(BlockCnt[i]);
+                chrout(BlockCnt[i]);
             }
 
             for (size_t i = 5; i > BlockCnt.size(); i--)
             {
-                ChrOut(0x20);
+                chrout(0x20);
             }
 
-            ChrOut(0x22);
-            QuotedText = true;
+            chrout(0x22);
 
             NumExtraSpaces = 0;
 
             for (int i = 0; i < 16; i++)
             {
                 unsigned char NextChar = Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i];
-                ChrOut(NextChar, true);
+
+                if (NextChar != 0xa0)
+                {
+                    chrout(NextChar);
+                }
+                else
+                {
+                    NumExtraSpaces++;
+                }
             }
 
-            ChrOut(0x22);
-            QuotedText = false;
+            chrout(0x22);
 
             for (int i = 0; i < NumExtraSpaces; i++)
             {
-                ChrOut(0x20);
+                chrout(0x20);
             }
 
             for (size_t i = 0; i < EntryType.length(); i++)
             {
                 B = EntryType[i];
-                ChrOut(B, true);
+                chrout(B);
             }
 
-            ChrOut(0x0d);     //CharY ++;
-
-            //CharX = 0;
+            chrout(0x0d);
         }
         DirPos += 32;
         if (DirPos > 256)
@@ -1631,7 +2018,7 @@ bool ConvertD64ToGif()
 
     for (size_t i = 0; i < BlocksFree.size(); i++)
     {
-        ChrOut(BlocksFree[i]);
+        chrout(BlocksFree[i]);
     }
 
     string BlocksFreeMsg = " BLOCKS FREE.";
@@ -1639,10 +2026,10 @@ bool ConvertD64ToGif()
     for (size_t i = 0; i < BlocksFreeMsg.length(); i++)
     {
         B = BlocksFreeMsg[i];
-        ChrOut(B, true);
+        chrout(B);
     }
 
-    ChrOut(0x0d, true);
+    chrout(0x0d);
 
     CreateGifFrame();
     GifWriteFrame(&Gif, GifImage, GifWidth, GifHeight, 2);
@@ -1652,11 +2039,11 @@ bool ConvertD64ToGif()
     for (size_t i = 0; i < ReadyMsg.length(); i++)
     {
         B = ReadyMsg[i];
-        ChrOut(B, true);
+        chrout(B);
     }
 #endif
 
-    ChrOut(0x0d,true);    //Instead of CharY ++
+    chrout(0x0d);
 
     size_t Pos = (size_t)(CharY * 80) + CharX;
     B = ScrRam[Pos];
@@ -1707,23 +2094,21 @@ bool ConvertD64ToPng()
     DirSector = 1;
     DirPos = 2;
 
-    ChrOut(0x30);
-    ChrOut(0x20);
+    chrout(0x30);
+    chrout(0x20);
 
-    HeaderText = true;
-    ChrOut(0x22, false, true);
-    QuotedText = true;
+    InvertedText = true;
+    chrout(0x22);
 
     unsigned int B = 0;
     for (int i = 0; i < 16; i++)
     {
         B = Disk[Track[DirTrack] + 0x90 + i];
-        ChrOut(B, true, true);
+        chrout(B);
     }
 
-    ChrOut(0x22, false, true);
-    QuotedText = false;
-    ChrOut(0x20, false, true);
+    chrout(0x22);
+    chrout(0x20);
 
     for (int i = 0; i < 5; i++)
     {
@@ -1732,12 +2117,9 @@ bool ConvertD64ToPng()
         {
             B = 0x31;   //if the 5th character is 0xa0 then the C64 displays a "1" instead
         }
-        ChrOut(B, true, true);
+        chrout(B);
     }
-
-    HeaderText = false;
-
-    ChrOut(0x0d);    //Instead of CharY ++
+    chrout(0x0d);
 
     DirTrack = 18;
     DirSector = 1;
@@ -1806,49 +2188,51 @@ bool ConvertD64ToPng()
             }
 
             int NumBlocks = Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 28] + (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 29] * 256);
-
-            //CharX = 0;
-            
+           
             string BlockCnt = to_string(NumBlocks);
             
             for (size_t i = 0; i < BlockCnt.size(); i++)
             {
-                ChrOut(BlockCnt[i]);
+                chrout(BlockCnt[i]);
             }
 
             for (size_t i = 5; i > BlockCnt.size(); i--)
             {
-                ChrOut(0x20);
+                chrout(0x20);
             }
 
-            ChrOut(0x22);
-            QuotedText = true;
+            chrout(0x22);
             
             NumExtraSpaces = 0;
 
             for (int i = 0; i < 16; i++)
             {
                 unsigned char NextChar = Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i];
-                ChrOut(NextChar, true);
+
+                if (NextChar != 0xa0)
+                {
+                    chrout(NextChar);
+                }
+                else
+                {
+                    NumExtraSpaces++;       //We will need to correct the entry length after the end-qoute
+                }
             }
 
-            ChrOut(0x22);
-            QuotedText = false;
+            chrout(0x22);
 
             for (int i = 0; i < NumExtraSpaces; i++)
             {
-                ChrOut(0x20);
+                chrout(0x20);
             }
 
             for (size_t i = 0; i < EntryType.length(); i++)
             {
                 B = EntryType[i];
-                ChrOut(B, true);
+                chrout(B);
             }
 
-            ChrOut(0x0d);     //CharY ++;
-            
-            //CharX = 0;
+            chrout(0x0d);            
         }
         DirPos += 32;
         if (DirPos > 256)
@@ -1888,7 +2272,7 @@ bool ConvertD64ToPng()
     
     for (size_t i = 0; i < BlocksFree.size(); i++)
     {
-        ChrOut(BlocksFree[i]);
+        chrout(BlocksFree[i]);
     }
     
     string BlocksFreeMsg = " BLOCKS FREE.";
@@ -1896,34 +2280,32 @@ bool ConvertD64ToPng()
     for (size_t i = 0; i < BlocksFreeMsg.length(); i++)
     {
         B = BlocksFreeMsg[i];
-        ChrOut(B, true);
+        chrout(B);
     }
     
-    ChrOut(0x0d, true);
-    //CharX = 0;
-    //CharY++;
+    chrout(0x0d);
 
     string ReadyMsg = "READY.";
 
     for (size_t i = 0; i < ReadyMsg.length(); i++)
     {
         B = ReadyMsg[i];
-        ChrOut(B, true);
+        chrout(B);
     }
 
-    ChrOut(0x0d, true);
+    chrout(0x0d);
 
 #endif
 
-    int RamSize = ColRam.size();
+    int RamSize = ScrRam.size();
 
-    while (ColRam[(size_t)RamSize - 80] == 0xff)
+    while ((ScrRam[(size_t)RamSize - 80] == 0x00) && (ScrRam[(size_t)RamSize - 40] == 0x00))
     {
         RamSize -= 80;
     }
-    if ((size_t)RamSize < ColRam.size())
+    if ((size_t)RamSize < ScrRam.size())
     {
-        ColRam.resize(RamSize);
+        ScrRam.resize(RamSize);
         ScrRam.resize(RamSize);
     }
 
@@ -2398,7 +2780,7 @@ void FixBAM(vector<unsigned char> &DiskImage)
 
     //Sparkle 2 and 2.1 disks don't mark the internal directory sectors (18:17 and 18:18) off, let's fix it.
     //Sparkle 2.0 dir(0) = $f7 $ff $73 $00
-    //Sparkle 2.1 dir(0) = $77 $7f $63 $00 
+    //Sparkle 2.1 dir(0) = $77 $7f $63 $00 (same in 3.0+)
 
     DirTrack = 18;
     DirSector = 17;
@@ -2565,17 +2947,17 @@ bool ImportFromD64()
         S = DA[DAPtr + 1];
     }
 
-    if ((OutputType == "png") || (OutputType == "gif"))                //Copy BAM if the output is PNG
+    //Copy BAM if the output is PNG or GIF. Do NOT copy if output is D64 - we don't want to overwrite the existing BAM.
+    if ((OutputType == "png") || (OutputType == "gif"))
     {
         for (int i = 4; i < 144; i++)
         {
             Disk[Track[18] + i] = DA[Track[18] + i];
         }
-
         FixBAM(Disk);
     }
     
-    return true;
+     return true;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
@@ -3602,14 +3984,14 @@ bool ImportFromJson()
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
 bool IdentifyColors()
-{
-    unsigned int Col1 = GetPixel(0, 0);  //The first of two allowed colors per image
+{   
+    unsigned int Col1 = GetPixel(ScrLeft, ScrTop);  //The first of two allowed colors per image
     unsigned int Col2 = Col1;
 
     //First find two colors (Col1 is already assigned to pixel(0,0))
-    for (size_t y = 0; y < ImgHeight; y++)  //Bug fix: check every single pixel, no just one in every Mplr-sized square
+    for (size_t y = ScrTop; y < ScrHeight; y++)  //Bug fix: check every single pixel, no just one in every Mplr-sized square
     {
-        for (size_t x = 0; x < ImgWidth; x++)
+        for (size_t x = ScrLeft; x < ScrWidth; x++)
         {
             unsigned int ThisCol = GetPixel(x, y);
             if ((ThisCol != Col1) && (Col2 == Col1))
@@ -3630,38 +4012,58 @@ bool IdentifyColors()
         return false;
     }
 
-    //Start with same colors
-    FGCol = Col1;
-    BGCol = Col1;
-
-    //First let's try to find a SPACE character -> its color will be the background color
-    
-    for (size_t cy = 0; cy < ImgHeight; cy += ((size_t)Mplr * 8))
+    if (!HasBorders)//(ImgWidth % 128 == 0)
     {
-        for (size_t cx = 0; cx < ImgWidth; cx += ((size_t)Mplr * 8))
+
+        //Start with same colors
+        FGCol = Col1;
+        BGCol = Col1;
+
+        //First let's try to find a SPACE character -> its color will be the background color
+
+        for (size_t cy = 0; cy < ImgHeight; cy += ((size_t)Mplr * 8))
         {
-            int PixelCnt = 0;
-            
-            unsigned int FirstCol = GetPixel(cx, cy);
-    
-            for (size_t y = 0; y < (size_t)Mplr * 8; y += (size_t)Mplr)
+            for (size_t cx = 0; cx < ImgWidth; cx += ((size_t)Mplr * 8))
             {
-                for (size_t x = 0; x < (size_t)Mplr * 8; x += (size_t)Mplr)
+                int PixelCnt = 0;
+
+                unsigned int FirstCol = GetPixel(cx, cy);
+
+                for (size_t y = 0; y < (size_t)Mplr * 8; y += (size_t)Mplr)
                 {
-                    if (GetPixel(cx + x, cy + y) == FirstCol)
+                    for (size_t x = 0; x < (size_t)Mplr * 8; x += (size_t)Mplr)
                     {
-                        PixelCnt++;
+                        if (GetPixel(cx + x, cy + y) == FirstCol)
+                        {
+                            PixelCnt++;
+                        }
                     }
                 }
-            }
-            if (PixelCnt == 64)         //SPACE character found (i.e. all 64 pixels are the same color - the opposite (0xa0) is not allowed in dirart)
-            {
-                BGCol = FirstCol;
-                FGCol = (BGCol == Col1) ? Col2 : Col1;
-                return true;
-            }
-        }//End cx
-    }//End cy
+                if (PixelCnt == 64)         //SPACE character found (i.e. all 64 pixels are the same color - the opposite (0xa0) is not allowed in dirart)
+                {
+                    BGCol = FirstCol;
+                    FGCol = (BGCol == Col1) ? Col2 : Col1;
+                    return true;
+                }
+            }//End cx
+        }//End cy
+    }
+    else
+    {
+        if (Col1 == GetPixel(ScrLeft, ScrTop))
+        {
+            BGCol = Col1;
+            FGCol = Col2;
+            return true;
+        }
+        else
+        {
+            BGCol = Col2;
+            FGCol = Col1;
+            return true;
+        }
+
+    }
 
 #ifdef PXDENSITY
         //No SPACE found in DirArt image, now check the distribution of low and high density pixels (i.e. pixels that have the highest chance to be eighter BG of FG color)
@@ -3855,6 +4257,476 @@ bool DecodeBmp()
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
+unsigned char IdentifyChar(int PixelCnt, size_t cx, size_t cy)
+{
+
+    for (size_t i = 0; i < 256; i++)
+    {
+        if (PixelCnt == PixelCntTab[i])
+        {
+            size_t px = i % 16;
+            size_t py = i / 16;
+            bool Match = true;
+            for (size_t y = 0; y < 8; y++)
+            {
+                for (size_t x = 0; x < 8; x++)
+                {
+                    size_t PixelX = cx + ((size_t)Mplr * x);
+                    size_t PixelY = cy + ((size_t)Mplr * y);
+                    unsigned int ThisCol = GetPixel(PixelX, PixelY);
+                    unsigned char DACol = 0;
+                    
+                    if (ThisCol == FGCol)
+                    {
+                        DACol = 1;
+                    }
+
+                    size_t CharSetPos = (py * 8 * 128) + (y * 128) + (px * 8) + x;  //Only check upper case charset
+
+                    if (DACol != CharSetTab[CharSetPos])
+                    {
+                        Match = false;
+                        break;
+                    }
+                }//Next x
+                if (!Match)
+                {
+                    break;
+                }//End if
+            }//Next y
+            if (Match)
+            {
+                return (unsigned char)i;
+            }//End if
+        }//End if
+    }//Next i
+
+    return (unsigned char)32;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+bool Import384()
+{
+
+    size_t cy = ScrTop;
+
+    //FIND DIR HEADER
+
+    bool HeaderFound = false;
+
+    while (cy < ScrTop + ScrHeight)
+    {
+        if (IdentifyChar(64-12, ScrLeft + (size_t)Mplr * 8 * 2, cy) == 0xa2)
+        {
+            //HEADER FOUND
+            unsigned char Entry[16]{};
+            size_t Idx = 0;
+
+            for (int j = 0; j < 16; j++)
+            {
+                Entry[j] = 0x20;
+            }
+
+            for (size_t cx = ScrLeft + (size_t)Mplr * 8 * 3; cx < ScrLeft + (size_t)Mplr * 8 * 19; cx += (size_t)Mplr * 8)
+            {
+                int PixelCnt = 0;
+                for (size_t y = 0; y < (size_t)Mplr * 8; y += (size_t)Mplr)
+                {
+                    for (size_t x = 0; x < (size_t)Mplr * 8; x += (size_t)Mplr)
+                    {
+                        if (GetPixel(cx + x, cy + y) == FGCol)
+                        {
+                            PixelCnt++;
+                        }
+                    }//End x
+                }//End y
+
+                unsigned char ThisChar = IdentifyChar(PixelCnt, cx, cy);
+
+                if (ThisChar != 0xa2)
+                {
+                    Entry[Idx++] = ThisChar & 0x7f;
+                }
+                else
+                {
+                    break;
+                }
+            }//Next cx
+
+            //HEADER
+            for (int i = 0; i < 16; i++)
+            {
+                unsigned int C = Entry[i];
+                Disk[Track[DirTrack] + 0x90 + i] = Petscii2DirArt[C];
+            }
+
+            Idx = 0;
+            for (int j = 0; j < 16; j++)
+            {
+                Entry[j] = 0x20;
+            }
+
+            for (size_t cx = ScrLeft + (size_t)Mplr * 8 * 21; cx < ScrLeft + (size_t)Mplr * 8 * 26; cx += (size_t)Mplr * 8)
+            {
+                int PixelCnt = 0;
+                for (size_t y = 0; y < (size_t)Mplr * 8; y += (size_t)Mplr)
+                {
+                    for (size_t x = 0; x < (size_t)Mplr * 8; x += (size_t)Mplr)
+                    {
+                        if (GetPixel(cx + x, cy + y) == FGCol)
+                        {
+                            PixelCnt++;
+                        }
+                    }//End x
+                }//End y
+
+                unsigned char ThisChar = IdentifyChar(PixelCnt, cx, cy);
+
+                if (ThisChar != 0xa2)
+                {
+                    Entry[Idx++] = ThisChar & 0x7f;
+                }
+                else
+                {
+                    break;
+                }
+            }//Next cx
+
+            //ID
+            for (int i = 0; i < 5; i++)
+            {
+                unsigned int C = Entry[i];
+                Disk[Track[DirTrack] + 0xa2 + i] = Petscii2DirArt[C];
+            }
+            HeaderFound = true;
+        }
+
+        cy += (size_t)Mplr * 8;
+
+        if (HeaderFound)
+        {
+            break;
+        }
+
+    }
+
+    if (!HeaderFound)
+    {
+        cy = ScrTop;        //Reset cy if we didn't find a dir header line, otherwise continue from current cy
+    }
+
+    bool EntryFound = false;
+
+    while (cy < ScrTop + ScrHeight)
+    {
+        if (IdentifyChar(12, ScrLeft + (size_t)Mplr * 8 * 5, cy) == 0x22)
+        {
+            EntryFound = true;
+            
+            unsigned char Entry[16]{};
+            size_t Idx = 0;
+
+            for (int j = 0; j < 16; j++)
+            {
+                Entry[j] = 0xa0;
+            }
+
+            for (size_t cx = ScrLeft + (size_t)Mplr * 8 * 6; cx < ScrLeft + (size_t)Mplr * 8 * 22; cx += (size_t)Mplr * 8)
+            {
+                int PixelCnt = 0;
+                for (size_t y = 0; y < (size_t)Mplr * 8; y += (size_t)Mplr)
+                {
+                    for (size_t x = 0; x < (size_t)Mplr * 8; x += (size_t)Mplr)
+                    {
+                        if (GetPixel(cx + x, cy + y) == FGCol)
+                        {
+                            PixelCnt++;
+                        }
+                    }//End x
+                }//End y
+
+                unsigned char ThisChar = IdentifyChar(PixelCnt, cx, cy);
+
+                if (ThisChar != 0x22)
+                {
+                    Entry[Idx++] = ThisChar;
+                }
+                else
+                {
+                    break;
+                }
+            }//Next cx
+
+            string sType = "";
+
+            for (size_t cx = ScrLeft + (size_t)Mplr * 8 * 23; cx < ScrLeft + (size_t)Mplr * 8 * 28; cx += (size_t)Mplr * 8)
+            {
+                int PixelCnt = 0;
+                for (size_t y = 0; y < (size_t)Mplr * 8; y += (size_t)Mplr)
+                {
+                    for (size_t x = 0; x < (size_t)Mplr * 8; x += (size_t)Mplr)
+                    {
+                        if (GetPixel(cx + x, cy + y) == FGCol)
+                        {
+                            PixelCnt++;
+                        }
+                    }//End x
+                }//End y
+
+                unsigned char ThisChar = IdentifyChar(PixelCnt, cx, cy);
+                
+                ThisChar = Petscii2DirArt[ThisChar];
+                
+                if (ThisChar != 32)
+                {
+                    sType += ThisChar;
+                }
+
+            }//Next cx
+
+            if (sType == "*SEQ")
+            {
+                FileType = 0x01;
+            }
+            else if (sType == "*PRG")
+            {
+                FileType = 0x02;
+            }
+            else if (sType == "*USR")
+            {
+                FileType = 0x03;
+            }
+            else if (sType == "DEL<")
+            {
+                FileType = 0xc0;
+            }
+            else if (sType == "SEQ<")
+            {
+                FileType = 0xc1;
+            }
+            else if (sType == "PRG<")
+            {
+                FileType = 0xc2;
+            }
+            else if (sType == "USR<")
+            {
+                FileType = 0xc3;
+            }
+            else if (sType == "REL<")
+            {
+                FileType = 0xc4;
+            }
+            else if (sType == "DEL")
+            {
+                FileType = 0x80;
+            }
+            else if (sType == "SEQ")
+            {
+                FileType = 0x81;
+            }
+            else if (sType == "PRG")
+            {
+                FileType = 0x82;
+            }
+            else if (sType == "USR")
+            {
+                FileType = 0x83;
+            }
+            else if (sType == "REL")
+            {
+                FileType = 0x84;
+            }
+            else
+            {
+                FileType = 0x80;    //Default file type is DEL
+            }
+
+            int EntryNumBlocks = 0;
+            int Decimal = 1;
+            for (size_t cx = ScrLeft + (size_t)Mplr * 8 * 4; cx >= ScrLeft; cx -= (size_t)Mplr * 8)
+            {
+                int PixelCnt = 0;
+                for (size_t y = 0; y < (size_t)Mplr * 8; y += (size_t)Mplr)
+                {
+                    for (size_t x = 0; x < (size_t)Mplr * 8; x += (size_t)Mplr)
+                    {
+                        if (GetPixel(cx + x, cy + y) == FGCol)
+                        {
+                            PixelCnt++;
+                        }
+                    }//End x
+                }//End y
+
+                unsigned char ThisChar = IdentifyChar(PixelCnt, cx, cy);
+                if (ThisChar != 32)
+                {
+                    EntryNumBlocks += Decimal * (ThisChar - 0x30);
+                    Decimal *= 10;
+                }
+
+            }//Next cx
+
+            EntryIndex++;
+
+            if ((EntryIndex >= FirstImportedEntry) && (EntryIndex <= LastImportedEntry))
+            {
+                FindNextDirPos();
+
+                if (DirPos != 0)
+                {
+                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = FileType;      //"DEL"
+                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
+                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
+
+                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 28] = EntryNumBlocks % 0x100;
+                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 29] = EntryNumBlocks / 0x100;
+
+                    for (int i = 0; i < 16; i++)
+                    {
+                        unsigned int C = Entry[i];
+                        if (C != 0xa0)
+                        {
+                            Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = Petscii2DirArt[C];
+                        }
+                        else
+                        {
+                            Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = 0xa0;
+                        }
+                    }
+                }
+                else
+                {
+                    return true;
+                }
+            }
+
+        }
+        else
+        {
+            if (EntryFound)
+            {
+                break;
+            }
+        }
+        cy += (size_t)Mplr * 8;
+    }
+
+    if (EntryFound)
+    {
+        //DO NOT IMPORT NUMBER OF FREE BLOCKS - IT IS DETERMINED BY THE BAM OF THE FINAL DISK
+    }
+
+    return true;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+void FindMplr()
+{
+
+    if (ImgWidth % 384 == 0)
+    {
+        HasBorders = true;
+        Mplr = ImgWidth / 384;
+
+        unsigned int Col = GetPixel(0, 0);
+
+        bool Match = true;
+
+        for (size_t y = 0; y < (size_t)Mplr * 35; y++)
+        {
+            for (size_t x = 0; x < (size_t)ImgWidth; x++)
+            {
+                if (GetPixel(x, y) != Col)
+                {
+                    HasBorders = false;
+                    Mplr = ImgWidth / 128;
+                    Match = false;
+                    break;
+                }
+            }
+            if (!Match)
+            {
+                break;
+            }
+        }
+
+        if (Match)
+        {
+            for (size_t y = ImgHeight - (size_t)Mplr * 37; y < (size_t)ImgHeight; y++)
+            {
+                for (size_t x = 0; x < (size_t)ImgWidth; x++)
+                {
+                    if (GetPixel(x, y) != Col)
+                    {
+                        HasBorders = false;
+                        Mplr = ImgWidth / 128;
+                        Match = false;
+                        break;
+                    }
+                }
+                if (!Match)
+                {
+                    break;
+                }
+            }
+
+        }
+
+        if (Match)
+        {
+            for (size_t y = (size_t)Mplr * 35; y < ImgHeight - (size_t)Mplr * 37; y++)
+            {
+                for (size_t x = 0; x < (size_t)Mplr * 32; x++)
+                {
+                    if (GetPixel(x, y) != Col)
+                    {
+                        HasBorders = false;
+                        Mplr = ImgWidth / 128;
+                        Match = false;
+                        break;
+                    }
+                }
+                if (!Match)
+                {
+                    break;
+                }
+            }
+
+        }
+
+        if (Match)
+        {
+            for (size_t y = (size_t)Mplr * 35; y < ImgHeight - (size_t)Mplr * 37; y++)
+            {
+                for (size_t x = (size_t)Mplr * 352; x < (size_t)ImgWidth; x++)
+                {
+                    if (GetPixel(x, y) != Col)
+                    {
+                        HasBorders = false;
+                        Mplr = ImgWidth / 128;
+                        Match = false;
+                        break;
+                    }
+                }
+                if (!Match)
+                {
+                    break;
+                }
+            }
+        }
+    }
+    else
+    {
+        HasBorders = false;
+        Mplr = ImgWidth / 128;
+    }
+
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
 bool ImportFromImage()
 {
     ImgRaw.clear();
@@ -3892,17 +4764,27 @@ bool ImportFromImage()
     }
     //Here we have the image decoded in Image vector of unsigned chars, 4 bytes representing a pixel in RGBA format
 
-    if (ImgWidth % 128 != 0)
+    if ((ImgWidth % 128 != 0) && (ImgWidth % 384 != 0))
     {
         cerr << "***CRITICAL***\tUnsupported image size. The image must be 128 pixels (16 chars) wide or a multiple of it if resized.\n";
         return false;
     }
 
-    Mplr = ImgWidth / 128;
+    FindMplr();
+
+    ScrLeft = (HasBorders ? 32 * (size_t)Mplr : 0);
+    ScrTop = (HasBorders ? 35 * (size_t)Mplr : 0);
+    ScrWidth = (HasBorders ? 320 * (size_t)Mplr : (size_t)ImgWidth);
+    ScrHeight = (HasBorders ? ImgHeight - 72 * (size_t)Mplr : (size_t)ImgHeight);
 
     if (!IdentifyColors())
     {
         return false;
+    }
+
+    if (HasBorders)  //(ImgWidth % 384 == 0)
+    {
+        return Import384();
     }
 
     int PixelCnt = 0;
@@ -4203,8 +5085,8 @@ int main(int argc, char* argv[])
     {
 
     #ifdef DEBUG
-        InFileName = "c:/dart/test/art1.c";
-        OutFileName = "c:/dart/test/output/art1.png";
+        InFileName = "c:/dart/test/propaganda34.d64";
+        OutFileName = "c:/dart/test/output/p34.d64";
         argSkippedEntries = "all";
         argEntryType = "del";
         //argPalette = "18";
