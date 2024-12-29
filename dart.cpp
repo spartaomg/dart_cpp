@@ -1,5 +1,5 @@
 
-//#define DEBUG
+#define DEBUG
 #define AddBlockCount
 
 #include "common.h"
@@ -1435,11 +1435,6 @@ void ChrOut(unsigned char PChar, bool ConvertToPetscii = false, bool Invert = fa
 
 bool CreatePng()
 {
-#ifdef DEBUG
-    //WriteBinaryFile(OutFileName + "Scr", ScrRam);
-    //WriteBinaryFile(OutFileName + "Col", ColRam);
-#endif
-
     size_t LastEntry = ColRam.size();
 
     for (size_t i = ColRam.size(); i >= 40; i -= 40)
@@ -1991,7 +1986,6 @@ bool ConvertD64ToGif()
                 DirPos = 0;
             }
         }
-
         CreateGifFrame();
         GifWriteFrame(&Gif, GifImage, GifWidth, GifHeight, 2);
         if (FrameCount % 10 == 0)
@@ -1999,6 +1993,11 @@ bool ConvertD64ToGif()
             cout << ".";
         }
         FrameCount++;
+
+        if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos] == 0)
+        {
+            DirPos = 0;
+        }
     }
 
 #ifdef AddBlockCount
@@ -2309,12 +2308,6 @@ bool ConvertD64ToPng()
         ScrRam.resize(RamSize);
     }
 
-
-#ifdef DEBUG
-    WriteBinaryFile("C:/Dart/Test/Anim/PngCol.bin", ColRam);
-    WriteBinaryFile("C:/Dart/Test/Anim/PngScr.bin", ScrRam);
-#endif
-
     return CreatePng();
 }
 
@@ -2377,7 +2370,7 @@ void MarkSectorAsFree(size_t T, size_t S)
     }
 
     size_t BitPtr = NumSectorPtr + 1 + (S / 8);     //BAM Position for Bit Change
-    unsigned char BitToSet = 1 << (S % 8);       //BAM Bit to be deleted
+    unsigned char BitToSet = 1 << (S % 8);          //BAM Bit to be deleted
 
     if ((Disk[BitPtr] & BitToSet) != 1)
     {
@@ -4149,11 +4142,11 @@ bool DecodeBmp()
 
     memcpy(&BmpInfoHeader, &ImgRaw[BIH], sizeof(BmpInfoHeader));
 
-    if (BmpInfoHeader.biWidth % 128 != 0)
-    {
-        cerr << "***CRITICAL***\tUnsupported BMP size. The image must be 128 pixels (16 chars) wide or a multiple of it if resized.\n";
-        return false;
-    }
+    //if (BmpInfoHeader.biWidth % 128 != 0)
+    //{
+        //cerr << "***CRITICAL***\tUnsupported BMP size. The image must be 128 pixels (16 chars) wide or a multiple of it if resized.\n";
+        //return false;
+    //}
 
     if ((BmpInfoHeader.biCompression != 0) && (BmpInfoHeader.biCompression != 3))
     {
@@ -4224,6 +4217,7 @@ bool DecodeBmp()
                     Image[BmpOffset + 0] = BmpInfo->bmiColors[PaletteIndex].rgbRed;
                     Image[BmpOffset + 1] = BmpInfo->bmiColors[PaletteIndex].rgbGreen;
                     Image[BmpOffset + 2] = BmpInfo->bmiColors[PaletteIndex].rgbBlue;
+                    Image[BmpOffset + 3] = 0xff;
                     BmpOffset += 4;
                 }
             }
@@ -4242,6 +4236,7 @@ bool DecodeBmp()
                 Image[BmpOffset + 0] = ImgRaw[RowOffset + x + 2];
                 Image[BmpOffset + 1] = ImgRaw[RowOffset + x + 1];
                 Image[BmpOffset + 2] = ImgRaw[RowOffset + x + 0];
+                Image[BmpOffset + 3] = 0xff;
                 BmpOffset += 4;
             }
         }
@@ -4725,68 +4720,8 @@ void FindMplr()
 
 }
 
-//----------------------------------------------------------------------------------------------------------------------------------------------------
-
-bool ImportFromImage()
+bool Import128()
 {
-    ImgRaw.clear();
-    Image.clear();
-
-    if (ReadBinaryFile(InFileName, ImgRaw) == -1)
-    {
-        cerr << "***CRITICAL***\tUnable to open image DirArt file.\n";
-        return false;
-    }
-    else if (ImgRaw.size() == 0)
-    {
-        cerr << "***CRITICAL***\tThe DirArt file cannot be 0 bytes long.\n";
-        return false;
-    }
-
-    if (DirArtType == "png")
-    {
-        //Load and decode PNG image using LodePNG (Copyright (c) 2005-2023 Lode Vandevenne)
-        unsigned int error = lodepng::decode(Image, ImgWidth, ImgHeight, ImgRaw);
-
-        if (error)
-        {
-            cout << "***CRITICAL***\tPNG decoder error: " << error << ": " << lodepng_error_text(error) << "\n";
-            return false;
-        }
-
-    }
-    else if (DirArtType == "bmp")
-    {
-        if(!DecodeBmp())
-        {
-            return false;
-        }
-    }
-    //Here we have the image decoded in Image vector of unsigned chars, 4 bytes representing a pixel in RGBA format
-
-    if ((ImgWidth % 128 != 0) && (ImgWidth % 384 != 0))
-    {
-        cerr << "***CRITICAL***\tUnsupported image size. The image must be 128 pixels (16 chars) wide or a multiple of it if resized.\n";
-        return false;
-    }
-
-    FindMplr();
-
-    ScrLeft = (HasBorders ? 32 * (size_t)Mplr : 0);
-    ScrTop = (HasBorders ? 35 * (size_t)Mplr : 0);
-    ScrWidth = (HasBorders ? 320 * (size_t)Mplr : (size_t)ImgWidth);
-    ScrHeight = (HasBorders ? ImgHeight - 72 * (size_t)Mplr : (size_t)ImgHeight);
-
-    if (!IdentifyColors())
-    {
-        return false;
-    }
-
-    if (HasBorders)  //(ImgWidth % 384 == 0)
-    {
-        return Import384();
-    }
-
     int PixelCnt = 0;
 
     for (size_t cy = 0; cy < ImgHeight; cy += (size_t)Mplr * 8)
@@ -4885,6 +4820,74 @@ bool ImportFromImage()
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
+bool ImportFromImage()
+{
+    ImgRaw.clear();
+    Image.clear();
+
+    if (ReadBinaryFile(InFileName, ImgRaw) == -1)
+    {
+        cerr << "***CRITICAL***\tUnable to open image DirArt file.\n";
+        return false;
+    }
+    else if (ImgRaw.size() == 0)
+    {
+        cerr << "***CRITICAL***\tThe DirArt file cannot be 0 bytes long.\n";
+        return false;
+    }
+
+    if (DirArtType == "png")
+    {
+        //Load and decode PNG image using LodePNG (Copyright (c) 2005-2023 Lode Vandevenne)
+        unsigned int error = lodepng::decode(Image, ImgWidth, ImgHeight, ImgRaw);
+
+        if (error)
+        {
+            cout << "***CRITICAL***\tPNG decoder error: " << error << ": " << lodepng_error_text(error) << "\n";
+            return false;
+        }
+    }
+    else if (DirArtType == "bmp")
+    {
+        if(!DecodeBmp())
+        {
+            return false;
+        }
+    }
+    
+    //Here we have the image decoded in Image vector of unsigned chars, 4 bytes representing a pixel in RGBA format
+
+    if ((ImgWidth % 128 != 0) && (ImgWidth % 384 != 0))
+    {
+        cerr << "***CRITICAL***\tUnsupported image size. The image must be 128 pixels (16 chars) wide or a multiple of it if resized.\n";
+        return false;
+    }
+
+    FindMplr();
+
+    ScrLeft = (HasBorders ? 32 * (size_t)Mplr : 0);
+    ScrTop = (HasBorders ? 35 * (size_t)Mplr : 0);
+    ScrWidth = (HasBorders ? 320 * (size_t)Mplr : (size_t)ImgWidth);
+    ScrHeight = (HasBorders ? ImgHeight - 72 * (size_t)Mplr : (size_t)ImgHeight);
+
+    if (!IdentifyColors())
+    {
+        return false;
+    }
+
+    if (HasBorders)  //(ImgWidth % 384 == 0)
+    {
+        return Import384();
+    }
+    else
+    {
+        return Import128();
+    }
+ 
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
 void CreateTrackTable()
 {
 
@@ -4919,8 +4922,8 @@ void ShowInfo()
 
     cout << "Usage:\n";
     cout << "------\n";
-    cout << "dart input -o [output.d64/output.png/output.gif] -n [\"disk name\"] -i [\"disk id\"] -s [skipped entries] -t [default entry type]\n";
-    cout << "           -f [first imported entry] - l [last imported entry]\n\n";
+    cout << "dart input -o [output.d64/output.png/output.gif] -n [\"disk name\"] -i [\"disk id\"] -s [skipped entries]\n";
+    cout << "           -t [default entry type] -f [first imported entry] -l [last imported entry]\n\n";
 
     cout << "input - the file from which the directory art will be imported. See accepted file types below.\n\n";
 
@@ -4957,7 +4960,7 @@ void ShowInfo()
     cout << "       imported. This parameter is optional. If not specified, DART will finish import after the last DirArt entry.\n\n";
 
     cout << "- [palette number (00-22) for PNG output] - a numeric value (0-based) which DART uses to determine the palette to be\n";
-    cout << "       used for a PNG output. You can choose from 23 palettes that are available in VICE 3.8:\n\n";
+    cout << "       used for a PNG or GIF output. You can choose from 23 palettes that are available in VICE 3.8:\n\n";
     cout << "               00 - C64HQ              08 - Godot              16 - Pepto PAL\n";
     cout << "               01 - C64S               09 - PALette            17 - Pepto PAL old\n";
     cout << "               02 - CCS64              10 - PALette 6569R1     18 - Pixcen\n";
@@ -5013,6 +5016,7 @@ void ShowInfo()
     cout << "C    - Marq's PETSCII Editor C array file. This file type can also be produced using Petmate. This is essentially a\n";
     cout << "       C source file which consists of a single unsigned char array declaration initialized with the dir entries.\n";
     cout << "       If present, DART will use the 'META:' comment after the array to determine the dimensions of the DirArt.\n\n";
+
     cout << "PET  - This format is supported by Marq's PETSCII Editor and Petmate. DART will use the first two bytes of the input\n";
     cout << "       file to determine the dimensions of the DirArt, but it will ignore the next three bytes (border and background\n";
     cout << "       colors, charset) as well as color RAM data. DART will import max. 16 chars per directory entry.\n\n";
@@ -5021,10 +5025,19 @@ void ShowInfo()
 
     cout << "PNG  - Portable Network Graphics image file. Image input files can only use two colors (background and foreground).\n";
     cout << "       DART will try to identify the colors by looking for a space character. If none found, it will use the darker\n";
-    cout << "       of the two colors as background color. Image width must be exactly 16 characters (128 pixels or its multiples\n";
-    cout << "       if the image is resized) and the height must be a multiple of 8 pixels. Borders are not allowed. Image files\n";
-    cout << "       must display the uppercase charset and their appearance cannot rely on command characters. DART uses the\n";
-    cout << "       LodePNG library by Lode Vandevenne to decode PNG files.\n\n";
+    cout << "       of the two colors as background color. Image files must display the uppercase charset and their appearance\n";
+    cout << "       cannot rely on command characters. DART accepts two input image formats: one with (VICE) borders and another\n"; 
+    cout << "       one without borders.\n\n";   
+
+    cout << "       - Borderless images must have a width of exactly 16 characters (128 pixels) and the height must be a multiple\n";
+    cout << "       of 8 pixels. Images can only contain directory entries without entry type. Directory header is not allowed.\n\n";
+
+    cout << "       - Images with borders must have a width of 384 pixels where the border is 32 pixels on each side. The height\n";
+    cout << "       must include a 35-pixel top and a 37-pixel bottom border (as in VICE). The \"screen\" portion of the image\n";
+    cout << "       must be 320 pixels wide and at least 200 pixels tall or more if the DirArt has more entries than what would\n";
+    cout << "       fit on a standard screen. The  image can also include a directory header with a disk name and ID, and entry\n";
+    cout << "       types. Bordered images can be created by listing the directory in VICE and then saving a screenshot. DART\n";
+    cout << "       can also create this format.\n";
 
     cout << "BMP  - Bitmap image file. Same rules and limitations as with PNGs.\n\n";
 
@@ -5068,7 +5081,10 @@ void ShowInfo()
 
     cout << "dart MyDirArt.d64 -o MyDirArt1.png -p 18\n\n";
 
-    cout << "DART will import the DirArt from a D64 file and convert it to a PNG, using palette 18 (Pixcen).\n";
+    cout << "DART will import the DirArt from a D64 file and convert it to a PNG, using palette 18 (Pixcen).\\nn";
+    
+    cout << "DART uses the LodePNG library by Lode Vandevenne (http://lodev.org/lodepng/) to encode and decode PNG files,\n";
+    cout << "and gif.h by Charlie Tangora (https://github.com/charlietangora/gif-h) to create animated GIFs.\n\n";
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
@@ -5085,8 +5101,8 @@ int main(int argc, char* argv[])
     {
 
     #ifdef DEBUG
-        InFileName = "c:/dart/test/propaganda34.d64";
-        OutFileName = "c:/dart/test/output/p34.d64";
+        InFileName = "c:/dart/test/png_1bit.png";
+        OutFileName = "c:/dart/test.png";
         argSkippedEntries = "all";
         argEntryType = "del";
         //argPalette = "18";
