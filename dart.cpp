@@ -106,7 +106,7 @@ string C64PaletteNames[23] {
 unsigned int BkgColor = 0;  // ColorBlue;       //dark blue
 //unsigned int ForeColor = ColorLtBlue;      //light blue
 
-size_t DirTrack{}, DirSector{}, LastDirTrack{}, LastDirSector{};
+size_t DirTrack = 18, DirSector = 1, LastDirTrack{}, LastDirSector{};
 size_t Track[41]{};
 
 int ScreenLeft = 32;
@@ -122,6 +122,8 @@ size_t ScrHeight = 0;
 bool HasBorders = false;
 
 int NumDirEntries = 0;
+int MaxNumDirEntries = ((0xa000 - 0x800) / 0x20) - 2;   //1213 + header + blocks free, this fills up the whole BASIC RAM
+
 #ifdef DEBUG
     int ThisDirEntry = 0;
 #endif
@@ -224,7 +226,7 @@ bool CreateDirectory(const string& DiskDir)
 
     if (!fs::exists(DiskDir))
     {
-        cerr << "***CRITICAL***\tUnable to create the following folder: " << DiskDir << "\n\n";
+        cerr << "***ABORT***\tUnable to create the following folder: " << DiskDir << "\n\n";
         return false;
     }
     return true;
@@ -244,7 +246,7 @@ bool WriteBinaryFile(string FileName, vector <unsigned char> binfile)
 
         if (!myFile.good())
         {
-            cerr << "***CRITICAL***\tError during writing " << FileName << ".bin\n";
+            cerr << "***ABORT***\tError during writing " << FileName << ".bin\n";
             myFile.close();
             return false;
         }
@@ -254,7 +256,7 @@ bool WriteBinaryFile(string FileName, vector <unsigned char> binfile)
     }
     else
     {
-        cerr << "***CRITICAL***\tError oprning file for writing disk image " << FileName << ".bin\n\n";
+        cerr << "***ABORT***\tError opening file for writing disk image " << FileName << ".bin\n\n";
         return false;
     }
 
@@ -274,7 +276,7 @@ bool WriteBinaryFile()
 
         if (!myFile.good())
         {
-            cerr << "***CRITICAL***\tError during writing " << OutFileName << "\n";
+            cerr << "***ABORT***\tError during writing " << OutFileName << "\n";
             myFile.close();
             return false;
         }
@@ -284,7 +286,7 @@ bool WriteBinaryFile()
     }
     else
     {
-        cerr << "***CRITICAL***\tError oprning file for writing disk image " << OutFileName << "\n\n";
+        cerr << "***ABORT***\tError opening file for writing disk image " << OutFileName << "\n\n";
         return false;
     }
 
@@ -327,7 +329,7 @@ bool WriteDiskImage(const string& DiskName)
 
         if (!myFile.good())
         {
-            cerr << "***CRITICAL***\tError during writing " << DiskName << "\n";
+            cerr << "***ABORT***\tError during writing " << DiskName << "\n";
             myFile.close();
             return false;
         }
@@ -337,7 +339,7 @@ bool WriteDiskImage(const string& DiskName)
     }
     else
     {
-        cerr << "***CRITICAL***\tError oprning file for writing disk image " << DiskName << "\n\n";
+        cerr << "***ABORT***\tError opening file for writing disk image " << DiskName << "\n\n";
         return false;
     }
 }
@@ -1446,20 +1448,20 @@ bool CreatePng()
         }
     }
 
-    NumDirEntries = 0;
+    int iNumDirEntries = 0;
 
     for (size_t i = 0; i < LastEntry; i += 40)
     {
         if ((ColRam[i] != 0xff) || (i % 80 == 0))
         {
-            NumDirEntries++;
+            iNumDirEntries++;
         }
     }
 
     ImgWidth = 384;
 
 #ifdef AddBlockCount
-    ImgHeight = NumDirEntries > 24 ? (NumDirEntries * 8) + 72 : 272;
+    ImgHeight = iNumDirEntries > 24 ? (iNumDirEntries * 8) + 72 : 272;
 #elif
     ImgHeight = NumEntries > 24 ? (NumEntries * 8) + 8 + 72 : 272;
 #endif
@@ -1543,9 +1545,6 @@ bool CreatePng()
         cout << "Error during encoding and saving PNG.\n";
         return false;
     }
-#ifdef DEBUG    
-    //WriteDiskImage(OutFileName + ".d64");
-#endif    
 
     return true;
 }
@@ -1600,13 +1599,13 @@ void CreateGifFrame()
         }
     }
 
-    NumDirEntries = 0;
+    int iNumDirEntries = 0;
 
     for (size_t i = 0; i < LastEntryPos; i += 40)
     {
         if ((ScrRam[i] != 0x00) || (i % 80 == 0))
         {
-            NumDirEntries++;
+            iNumDirEntries++;
         }
     }
     int NumEntries = 0;
@@ -1700,21 +1699,18 @@ void CreateGifFrame()
 bool ConvertD64ToGif()
 {
     int FrameCount = 0;
-#ifdef DEBUG
-    //WriteDiskImage("C:/Dart/Test/Test.d64");
-#endif
 
     const char* GifFileName = OutFileName.c_str();
 
     GifWriter Gif = {};
     GifBegin(&Gif, GifFileName, GifWidth, GifHeight, 2);
 
-    NumDirEntries = CalcNumEntries();
+    int iNumDirEntries = CalcNumEntries();
 
-    ScrRam.resize((size_t)(NumDirEntries + 4 + 8) * 80);    //80-char long virtual lines
-    ColRam.resize((size_t)(NumDirEntries + 4 + 8) * 80);
+    ScrRam.resize((size_t)(iNumDirEntries + 4 + 8) * 80);    //80-char long virtual lines
+    ColRam.resize((size_t)(iNumDirEntries + 4 + 8) * 80);
 
-    for (int i = 0; i < (NumDirEntries + 4 + 8) * 80; i++)
+    for (int i = 0; i < (iNumDirEntries + 4 + 8) * 80; i++)
     {
         ScrRam[i] = 0x00;   //Unused Petscii code - indicates that the line is unused
         ColRam[i] = 0xff;   //Unused color code - no color change needed
@@ -1857,9 +1853,9 @@ bool ConvertD64ToGif()
 
     chrout(0x0d);
 
-    DirTrack = 18;
-    DirSector = 1;
-    DirPos = 2;
+    //DirTrack = 18;
+    //DirSector = 1;
+    //DirPos = 2;
 
     while (DirPos != 0)
     {
@@ -2002,12 +1998,12 @@ bool ConvertD64ToGif()
 
 #ifdef AddBlockCount
     int NumBlocksFree = 0;
-    DirTrack = 18;
+    //DirTrack = 18;
     for (size_t i = 1; i < 36; i++)
     {
         if (i != 18)        //Skip track 18
         {
-            NumBlocksFree += Disk[Track[DirTrack] + (i * 4)];
+            NumBlocksFree += Disk[Track[18] + (i * 4)];
         }
     }
 
@@ -2074,16 +2070,12 @@ bool ConvertD64ToGif()
 bool ConvertD64ToPng()
 {   
 
-#ifdef DEBUG
-    //WriteDiskImage("C:/Dart/Test/Test.d64");
-#endif
+    int iNumDirEntries = CalcNumEntries();
 
-    NumDirEntries = CalcNumEntries();
+    ScrRam.resize((size_t)(iNumDirEntries + 4) * 80);    //80-char long virtual lines
+    ColRam.resize((size_t)(iNumDirEntries + 4) * 80);
 
-    ScrRam.resize((size_t)(NumDirEntries + 4) * 80);    //80-char long virtual lines
-    ColRam.resize((size_t)(NumDirEntries + 4) * 80);
-
-    for (int i = 0; i < (NumDirEntries + 4) * 80; i++)
+    for (int i = 0; i < (iNumDirEntries + 4) * 80; i++)
     {
         ScrRam[i] = 0x00;   //Unused Petscii code - indicates that the line is unused
         ColRam[i] = 0xff;   //Unused color code - no color change needed
@@ -2256,12 +2248,12 @@ bool ConvertD64ToPng()
 
 #ifdef AddBlockCount
     int NumBlocksFree = 0;
-    DirTrack = 18;
+    //DirTrack = 18;
     for (size_t i = 1; i < 36; i++)
     {
         if (i != 18)        //Skip track 18
         {
-            NumBlocksFree += Disk[Track[DirTrack] + (i * 4)];
+            NumBlocksFree += Disk[Track[18] + (i * 4)];
         }
     }
 
@@ -2397,15 +2389,15 @@ void FindNextEmptyDirSector()
     {
         if ((Disk[BAMPos] == 0) || ((Disk[BAMPos] == 1) && (Disk[BAMPos + 1] == 0x01)))
         {
-            if (OutputType == "d64")
-            {
-                DirSector = 0;
-                DirPos = 0;     //This will indicate that the directory is full, no more entries are possible
-                cout << "***INFO***\tDirectory is full.\n";
-                return;
-            }
-            else if ((OutputType == "png") ||(OutputType == "gif"))
-            {
+            //if (OutputType == "d64")
+            //{
+                //DirSector = 0;
+                //DirPos = 0;     //This will indicate that the directory is full, no more entries are possible
+                //cout << "***INFO***\tDirectory is full.\n";
+                //return;
+            //}
+            //else if ((OutputType == "png") ||(OutputType == "gif"))
+            //{
                 if (DirTrack == 35)
                 {
                     DirTrack = 17;
@@ -2438,7 +2430,7 @@ void FindNextEmptyDirSector()
                     cout << "***INFO***\tDirectory is full.\n";
                     return;
                 }
-            }
+            //}
         }
 
         DirSector = 1; //Skip the first sector on each track (weird, but sector 0 as next sector in chain on -any- track means end of directory)
@@ -2490,7 +2482,7 @@ void FindNextDirPos() {
         DirPos += 32;
         if (DirPos > 256)   //This sector is full, let's find the next dir sector
         {
-            if ((Disk[Track[DirTrack] + (DirSector * 256) + 0] > 0) && (Disk[Track[DirTrack] + (DirSector * 256) + 0] < 41))
+            if ((Disk[Track[DirTrack] + (DirSector * 256) + 0] > 0) && (Disk[Track[DirTrack] + (DirSector * 256) + 0] < 36))
             {
                 //This is NOT the last sector in the T:S chain, we are overwriting existing dir entries
                 
@@ -2523,7 +2515,15 @@ void FindNextDirPos() {
     
     if (DirPos != 0)
     {
-        MarkSectorAsUsed(Disk, DirTrack, DirSector);
+        NumDirEntries++;
+        if (NumDirEntries == MaxNumDirEntries)
+        {
+            DirPos = 0;
+        }
+        else
+        {
+            MarkSectorAsUsed(Disk, DirTrack, DirSector);
+        }
     }
 }
 
@@ -2532,31 +2532,42 @@ void FindNextDirPos() {
 bool FindLastUsedDirPos()
 {
     //Check if the BAM shows free sectors on track 18
-    if (Disk[Track[DirTrack] + (size_t)(18 * 4)] == 0)
-    {
-        cerr << "***CRITICAL***Track 18 is full. DART is unable to append to this directory.\n";
-        return false;
+    //if (Disk[Track[DirTrack] + (size_t)(18 * 4)] == 0)
+    //{
+        //cerr << "***ABORT***Track 18 is full. DART is unable to append to this directory.\n";
+        //return false;
+    //}
 
-    }
+    NumDirEntries = 0;
 
-    unsigned char SectorChain[18]{};
+    unsigned char SectorChain[664]{};
+    unsigned char TrackChain[664]{};
+    
     int ChainIndex = 0;
 
+    TrackChain[ChainIndex] = DirTrack;
     SectorChain[ChainIndex] = DirSector;
 
+    size_t DiskPos = Track[DirTrack] + (DirSector * 256) + 0;
+
     //First find the last used directory sector
-    while ((Disk[Track[DirTrack] + (DirSector * 256) + 0] > 0) && (Disk[Track[DirTrack] + (DirSector * 256) + 0] < 41))
+    while ((Disk[DiskPos] > 0) && (Disk[DiskPos] < 36))
     {
-        DirTrack = Disk[Track[DirTrack] + (DirSector * 256) + 0];
-        DirSector = Disk[Track[DirTrack] + (DirSector * 256) + 1];
+        NumDirEntries += 8;
 
-        if (DirTrack != 18)
-        {
-            cerr << "***CRITICAL***The directory on this disk extends beyond track 18. DART only supports directories on track 18.\n";
-            return false;
-        }
+        DirTrack = Disk[DiskPos + 0];
+        DirSector = Disk[DiskPos + 1];
 
-        SectorChain[++ChainIndex] = DirSector;
+        //if (DirTrack != 18)
+        //{
+            //cerr << "***ABORT***The directory on this disk extends beyond track 18. DART only supports directories on track 18.\n";
+            //return false;
+        //}
+
+        TrackChain[++ChainIndex] = DirTrack;
+        SectorChain[ChainIndex] = DirSector;
+
+        DiskPos = Track[DirTrack] + (DirSector * 256) + 0;
     }
 
     Disk[Track[DirTrack] + (DirSector * 256) + 0] = 0;
@@ -2565,24 +2576,37 @@ bool FindLastUsedDirPos()
     //Then find last used dir entry slot
     DirPos = (7 * 32) + 2;
 
+    NumDirEntries += 8;
+
     while (Disk[Track[DirTrack] + (DirSector * 256) + DirPos] == 0)
     {
         DirPos -= 32;
+        NumDirEntries--;
         if (DirPos < 0)
         {
             if (ChainIndex > 0)
             {
                 DirPos += 256;
-                DirSector = SectorChain[--ChainIndex];
+                DirTrack = TrackChain[--ChainIndex];
+                DirSector = SectorChain[ChainIndex];
             }
             else
             {
-                DirPos = 0;
+                DirPos = 0;               
                 break;
             }
         }
     }
-    return true;
+
+    //if (NumDirEntries == MaxNumDirEntries - 1)
+    //{
+        //cerr << "***ABORT***\tThe target directory already contains the maximum number of " << (dec) << MaxNumDirEntries << " entries. No more entries can be appended!\n";
+        //return false;
+    //}
+    //else
+    //{
+        return true;
+    //}
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -2628,7 +2652,7 @@ bool ResetDirEntries()
         FindNextDirPos();
         if (DirPos == 0)
         {
-            cerr << "***CRITICAL***\tUnable to skip " << NumSkippedEntries << "entries!\n";
+            cerr << "***ABORT***\tUnable to skip " << NumSkippedEntries << "entries!\n";
             return false;
         }
 
@@ -2657,7 +2681,7 @@ bool ResetDirEntries()
 
         if (i > 256)
         {
-            if ((Disk[Track[DT] + (DS * 256) + 0] > 0) && (Disk[Track[DT] + (DS * 256) + 0] < 41))
+            if ((Disk[Track[DT] + (DS * 256) + 0] > 0) && (Disk[Track[DT] + (DS * 256) + 0] < 36))
             {
                 DT = Disk[Track[DT] + (DS * 256) + 0];
                 DS = Disk[Track[DT] + (DS * 256) + 1];
@@ -2685,7 +2709,7 @@ void CreateDisk()
     size_t CP = Track[18];
 
     DiskSize = StdDiskSize;
-
+    Disk.clear();
     Disk.resize(StdDiskSize, 0);
 
     Disk[CP + 0] = 0x12;        //Track 18
@@ -2811,7 +2835,7 @@ bool OpenOutFile()
         }
         else if ((DiskSize != StdDiskSize) && (DiskSize != ExtDiskSize))    //Otherwise make sure the output disk is the correct size
         {
-            cerr << "***CRITICAL***\t Invalid output disk file size!\n";
+            cerr << "***ABORT***\t Invalid output disk file size!\n";
             return false;
         }
 
@@ -2857,17 +2881,22 @@ bool ImportFromD64()
 
     if (ReadBinaryFile(InFileName, DA) == -1)
     {
-        cerr << "***CRITICAL***\tUnable to open the following DirArt file: " << InFileName << "\n";
+        cerr << "***ABORT***\tUnable to open the following DirArt file: " << InFileName << "\n";
         return false;
     }
     else if ((DA.size() != StdDiskSize) && (DA.size() != ExtDiskSize))
     {
-        cerr << "***CRITICAL***\tInvalid D64 DirArt file size: " << dec << DA.size() << " byte(s)\n";
+        cerr << "***ABORT***\tInvalid D64 DirArt file size: " << dec << DA.size() << " byte(s)\n";
         return false;
     }
 
     if (DA[Track[18] + 0x90] != 0xa0)       //Import directory header only if one exists in input disk image
     {
+        if (!argDiskName.empty())
+        {
+            cout << "***INFO***\tDisk name is imported from D64 source file. Ignoring option -n\n";
+        }
+
         for (int i = 0; i < 16; i++)
         {
             Disk[Track[18] + 0x90 + i] = DA[Track[18] + 0x90 + i];
@@ -2875,14 +2904,26 @@ bool ImportFromD64()
     }
     else if (!argDiskName.empty())          //Otherwise, check if disk name is specified in command line
     {
-        for (int i = 0; i < 16; i++)
+        for (size_t i = 0; i < 16; i++)
         {
-            Disk[Track[18] + 0x90 + i] = Ascii2DirArt[toupper(argDiskName[i])];
+            if (i < argDiskName.size())
+            {
+                Disk[Track[18] + 0x90 + i] = Ascii2DirArt[toupper(argDiskName[i])];
+            }
+            else
+            {
+                Disk[Track[18] + 0x90 + i] = 0xa0;
+            }
         }
     }
 
     if (DA[Track[18] + 0xa2] != 0xa0)       //Import directory ID only if one exists in input disk image
     {
+        if (!argDiskID.empty())
+        {
+            cout << "***INFO***\tDisk ID is imported from D64 source file. Ignoring option -n\n";
+        }
+
         for (int i = 0; i < 5; i++)
         {
             Disk[Track[18] + 0xa2 + i] = DA[Track[18] + 0xa2 + i];
@@ -2890,25 +2931,38 @@ bool ImportFromD64()
     }
     else if (!argDiskID.empty())            //Otherwise, check if disk ID is specified in command line
     {
-        for (int i = 0; i < 5; i++)
+        for (size_t i = 0; i < 5; i++)
         {
-            Disk[Track[18] + 0xa2 + i] = Ascii2DirArt[toupper(argDiskID[i])];
+            if (i < argDiskID.size())
+            {
+                Disk[Track[18] + 0xa2 + i] = Ascii2DirArt[toupper(argDiskID[i])];
+            }
+            else
+            {
+                Disk[Track[18] + 0xa2 + i] = 0xa0;
+            }
         }
     }
     
-    DirTrack = 18;
-    DirSector = 1;
+    //DirTrack = 18;
+    //DirSector = 1;
 
     size_t T = 18;
     size_t S = 1;
 
-    bool DirFull = false;
+    //bool DirFull = false;
     size_t DAPtr{};
 
-    while ((!DirFull) && (T != 0))
+    //Copy Dir Entries until
+    //(1) Finished (T==0) OR
+    //(2) Max number of Dir Entries reached OR
+    //(3) Disk is full (DirPos == 0)
+
+    while ((NumDirEntries < MaxNumDirEntries) && (T != 0))
     {
         DAPtr = Track[T] + (S * 256);
-        for (int b = 2; b < 256; b += 32)
+        int b = 2;
+        while ((b < 256) && (NumDirEntries < MaxNumDirEntries))
         {
             if (DA[DAPtr + b] != 0)
             {
@@ -2931,11 +2985,19 @@ bool ImportFromD64()
                     }
                     else
                     {
-                        return true;
+                        //return true;
+                        break;
                     }
                 }
             }
+            b += 32;
         }
+
+        if (DirPos == 0)
+        {
+            break;
+        }
+
         T = DA[DAPtr];
         S = DA[DAPtr + 1];
     }
@@ -2943,13 +3005,18 @@ bool ImportFromD64()
     //Copy BAM if the output is PNG or GIF. Do NOT copy if output is D64 - we don't want to overwrite the existing BAM.
     if ((OutputType == "png") || (OutputType == "gif"))
     {
-        for (int i = 4; i < 144; i++)
+        for (int i = 0; i < 72; i++)
         {
             Disk[Track[18] + i] = DA[Track[18] + i];
         }
-        FixBAM(Disk);
+        //Skip track 18 - some imported D64s have a faulty BAM, track 18 is not included in free block count and we need the correct one there
+        for (int i = 76; i < 144; i++)
+        {
+            Disk[Track[18] + i] = DA[Track[18] + i];
+        }
+        FixBAM(Disk);       //In case we imported from an old Sparkle disk...
     }
-    
+
      return true;
 }
 
@@ -2993,7 +3060,7 @@ bool ImportFromTxt()
 
     if (DirArt.empty())
     {
-        cerr << "***CRITICAL***\tUnable to open the following DirArt file: " << InFileName << "\n";
+        cerr << "***ABORT***\tUnable to open the following DirArt file: " << InFileName << "\n";
         return false;
     }
 
@@ -3042,12 +3109,12 @@ bool ImportFromBinary() {
 
     if (ReadBinaryFile(InFileName, DA) == -1)
     {
-        cerr << "***CRITICAL***\tUnable to open the following DirArt file: " << InFileName << "\n";
+        cerr << "***ABORT***\tUnable to open the following DirArt file: " << InFileName << "\n";
         return false;
     }
     else if (DA.size() == 0)
     {
-        cerr << "***CRITICAL***\t The DirArt file is 0 bytes long.\n";
+        cerr << "***ABORT***\tThe DirArt file is 0 bytes long.\n";
         return false;
     }
 
@@ -3256,7 +3323,7 @@ bool ImportFromCArray() {
 
     if (DA.empty())
     {
-        cerr << "***CRITICAL***\tUnable to open the following DirArt file: " << InFileName << "\n";
+        cerr << "***ABORT***\tUnable to open the following DirArt file: " << InFileName << "\n";
         return false;
     }
 
@@ -3354,7 +3421,7 @@ bool AddAsmDirEntry(string AsmDirEntry)
     }
 
     string EntrySegments[5];
-    string delimiter = "\"";        // = " (entry gets split at quotation mark) NOT A BUG, DO NOT CHANGE THIS
+    string delimiter = "\"";        // = " (entry gets split at quotation marks) NOT A BUG, DO NOT CHANGE THIS
     int NumSegments = 0;
 
     for (int i = 0; i < 5; i++)
@@ -3433,13 +3500,17 @@ bool AddAsmDirEntry(string AsmDirEntry)
                     {
                         FileType = 0x84;
                     }
-                    //else
-                    //{
-                    //    FileType = 0x80;
-                    //}
+                    else
+                    {
+                        FileType = 0x80;
+                    }
                 }
             }
-
+            else
+            {
+                FileType = 0x80;    //Default file type is DEL
+            }
+            
             EntryIndex++;
 
             if ((EntryIndex >= FirstImportedEntry) && (EntryIndex <= LastImportedEntry))
@@ -3600,13 +3671,65 @@ bool AddAsmDiskParameters()
         OutFileName = DiskName;
 
         CorrectFilePathSeparators();        //Replace "\" with "/" which is recognized by Windows as well
+    }
 
-        if (!OpenOutFile())
-            return false;
+    //Find the input file's extension
+    int ExtStart = InFileName.length();
 
+    for (int i = OutFileName.length() - 1; i >= 0; i--)
+    {
+        if (OutFileName[i] == '/')
+        {
+            //We've reached a path separator before a "." -> no extension
+            break;
+        }
+        else if (OutFileName[i] == '.')
+        {
+            ExtStart = i + 1;
+            break;
+        }
+    }
+
+    OutputType = "";
+
+    for (size_t i = ExtStart; i < OutFileName.length(); i++)
+    {
+        OutputType += tolower(OutFileName[i]);
+    }
+
+    if ((OutputType != "png") && (OutputType != "gif") && (OutputType != "d64"))
+    {
+        cerr << "***ABORT***\tUnrecognized output file type: " << OutFileName << "\n";
+        return false;
+    }
+
+    if (!OpenOutFile())
+        return false;
+
+    cout << "***INFO***\tImport target " << OutFileName << " specified in ASM source file. Ignoring option -o\n";
+
+    if (OutputType == "d64")
+    {
         if (AppendMode)
         {
+            cout << "Import mode: Append, skipping all existing directory entries in " + OutFileName + "\n";
+
             if (!FindLastUsedDirPos())
+                return false;
+        }
+        else
+        {
+            cout << "Import mode: Overwrite";
+            if (NumSkippedEntries > 0)
+            {
+                cout << ", skipping " + argSkippedEntries + " directory " + ((NumSkippedEntries == 1) ? "entry in " : "entries in ") + OutFileName + "\n";
+            }
+            else
+            {
+                cout << "\n";
+            }
+
+            if (!ResetDirEntries())
                 return false;
         }
     }
@@ -3638,17 +3761,35 @@ bool AddAsmDiskParameters()
 
     if (!DirHeader.empty())
     {
+        if (!argDiskName.empty())
+        {
+            cout << "***INFO***\tDisk name \"" << DirHeader << "\" specified in ASM source file. Ignoring option -n\n";
+        }
+
         for (size_t i = 0; i < 16; i++)
         {
-            DirHeader += 0xa0;
-            Disk[Track[18] + 0x90 + i] = Ascii2DirArt[toupper(DirHeader[i])];
+            if (i < DirHeader.size())
+            {
+                Disk[Track[18] + 0x90 + i] = Ascii2DirArt[toupper(DirHeader[i])];
+            }
+            else
+            {
+                Disk[Track[18] + 0x90 + i] = 0xa0;
+            }
         }
     }
     else if (!argDiskName.empty())
     {
         for (size_t i = 0; i < 16; i++)
         {
-            Disk[Track[18] + 0x90 + i] = Ascii2DirArt[toupper(argDiskName[i])];
+            if (i < argDiskName.size())
+            {
+                Disk[Track[18] + 0x90 + i] = Ascii2DirArt[toupper(argDiskName[i])];
+            }
+            else
+            {
+                Disk[Track[18] + 0x90 + i] = 0xa0;
+            }
         }
     }
 
@@ -3679,17 +3820,35 @@ bool AddAsmDiskParameters()
 
     if (!DirID.empty())
     {
+        if (!argDiskID.empty())
+        {
+            cout << "***INFO***\tDisk ID \"" << DirID << "\" specified in ASM source file. Ignoring option -i\n";
+        }
+
         for (size_t i = 0; i < 5; i++)
         {
-            DirID += 0xa0;
-            Disk[Track[18] + 0xa2 + i] = Ascii2DirArt[toupper(DirID[i])];
+            if (i < DirID.size())
+            {
+                Disk[Track[18] + 0xa2 + i] = Ascii2DirArt[toupper(DirID[i])];
+            }
+            else
+            {
+                Disk[Track[18] + 0xa2 + i] = 0xa0;
+            }
         }
     }
     else if (!argDiskID.empty())
     {
         for (size_t i = 0; i < 5; i++)
         {
-            Disk[Track[18] + 0xa2 + i] = Ascii2DirArt[toupper(argDiskID[i])];
+            if (i < argDiskID.size())
+            {
+                Disk[Track[18] + 0xa2 + i] = Ascii2DirArt[toupper(argDiskID[i])];
+            }
+            else
+            {
+                Disk[Track[18] + 0xa2 + i] = 0xa0;
+            }
         }
     }
 
@@ -3705,7 +3864,7 @@ bool ImportFromAsm()
 
     if (DirArt.empty())
     {
-        cerr << "***CRITICAL***\tUnable to open the following DirArt file: " << InFileName << "\n";
+        cerr << "***ABORT***\tUnable to open the following DirArt file: " << InFileName << "\n";
         return false;
     }
 
@@ -3778,12 +3937,12 @@ bool ImportFromPet()
 
     if (ReadBinaryFile(InFileName, PetFile) == -1)
     {
-        cerr << "***CRITICAL***\tUnable to open the following .PET DirArt file: " << InFileName << "\n";
+        cerr << "***ABORT***\tUnable to open the following .PET DirArt file: " << InFileName << "\n";
         return false;
     }
     else if (PetFile.size() == 0)
     {
-        cerr << "***CRITICAL***\t This .PET DirArt file is 0 bytes long: " << InFileName << "\n";
+        cerr << "***ABORT***\tThis .PET DirArt file is 0 bytes long: " << InFileName << "\n";
         return false;
     }
 
@@ -3841,7 +4000,7 @@ bool ImportFromJson()
 
     if (DirArt.empty())
     {
-        cerr << "***CRITICAL***\tUnable to open the following .JSON DirArt file: " << InFileName << "\n";
+        cerr << "***ABORT***\tUnable to open the following .JSON DirArt file: " << InFileName << "\n";
         return false;
     }
 
@@ -3993,7 +4152,7 @@ bool IdentifyColors()
             }
             else if ((ThisCol != Col1) && (ThisCol != Col2))
             {
-                cerr << "***CRITICAL***\tThis image contains more than two colors.\n";
+                cerr << "***ABORT***\tThis image contains more than two colors.\n";
                 return false;
             }
         }
@@ -4001,7 +4160,7 @@ bool IdentifyColors()
 
     if (Col1 == Col2)
     {
-        cerr << "***CRITICAL***Unable to determine foreground and background colors in DirArt image file.\n";
+        cerr << "***ABORT***\tUnable to determine foreground and background colors in DirArt image file.\n";
         return false;
     }
 
@@ -4119,7 +4278,7 @@ bool IdentifyColors()
 
     if (BGCol == FGCol)
     {
-        cerr << "***CRITICAL***Unable to determine foreground and background colors in DirArt image file.\n";
+        cerr << "***ABORT***\tUnable to determine foreground and background colors in DirArt image file.\n";
         return false;
     }
 
@@ -4136,7 +4295,7 @@ bool DecodeBmp()
 
     if (ImgRaw.size() < MINSIZE)
     {
-        cerr << "***CRITICAL***\tThe size of this BMP file is smaller than the minimum size allowed.\n";
+        cerr << "***ABORT***\tThe size of this BMP file is smaller than the minimum size allowed.\n";
         return false;
     }
 
@@ -4144,13 +4303,13 @@ bool DecodeBmp()
 
     //if (BmpInfoHeader.biWidth % 128 != 0)
     //{
-        //cerr << "***CRITICAL***\tUnsupported BMP size. The image must be 128 pixels (16 chars) wide or a multiple of it if resized.\n";
+        //cerr << "***ABORT***\tUnsupported BMP size. The image must be 128 pixels (16 chars) wide or a multiple of it if resized.\n";
         //return false;
     //}
 
     if ((BmpInfoHeader.biCompression != 0) && (BmpInfoHeader.biCompression != 3))
     {
-        cerr << "***CRITICAL***\tUnsupported BMP format. Sparkle can only work with uncompressed BMP files.\nT";
+        cerr << "***ABORT***\tUnsupported BMP format. Sparkle can only work with uncompressed BMP files.\nT";
         return false;
     }
 
@@ -4181,7 +4340,7 @@ bool DecodeBmp()
 
     if (ImgRaw.size() != CalcSize)
     {
-        cerr << "***CRITICAL***\tCorrupted BMP file size.\n";
+        cerr << "***ABORT***\tCorrupted BMP file size.\n";
 
         delete[] BmpInfo;
 
@@ -4827,12 +4986,12 @@ bool ImportFromImage()
 
     if (ReadBinaryFile(InFileName, ImgRaw) == -1)
     {
-        cerr << "***CRITICAL***\tUnable to open image DirArt file.\n";
+        cerr << "***ABORT***\tUnable to open image DirArt file.\n";
         return false;
     }
     else if (ImgRaw.size() == 0)
     {
-        cerr << "***CRITICAL***\tThe DirArt file cannot be 0 bytes long.\n";
+        cerr << "***ABORT***\tThe DirArt file cannot be 0 bytes long.\n";
         return false;
     }
 
@@ -4843,7 +5002,7 @@ bool ImportFromImage()
 
         if (error)
         {
-            cout << "***CRITICAL***\tPNG decoder error: " << error << ": " << lodepng_error_text(error) << "\n";
+            cout << "***ABORT***\tPNG decoder error: " << error << ": " << lodepng_error_text(error) << "\n";
             return false;
         }
     }
@@ -4859,7 +5018,7 @@ bool ImportFromImage()
 
     if ((ImgWidth % 128 != 0) && (ImgWidth % 384 != 0))
     {
-        cerr << "***CRITICAL***\tUnsupported image size. The image must be 128 pixels (16 chars) wide or a multiple of it if resized.\n";
+        cerr << "***ABORT***\tUnsupported image size. The image must be 128 pixels (16 chars) wide or a multiple of it if resized.\n";
         return false;
     }
 
@@ -4929,7 +5088,7 @@ void ShowInfo()
 
     cout << "-o [output.d64/output.png/output.gif] - the D64/PNG/GIF file to which the directory art will be imported. This\n";
     cout << "       parameter is optional and it will be ignored if it is used with KickAss ASM input files that include the\n";
-    cout << "       'filename' disk parameter. If an output is not specified then DART will create an input_out.d64 file. If the\n";
+    cout << "       'filename' disk parameter. If an output is not specified then DART will create an input_dart.d64 file. If the\n";
     cout << "       output file is a PNG or GIF then DART will create a PNG \"screenshot\" of the directory listing or an animated\n";
     cout << "       GIF instead of a D64 file. If there are less than 23 entries then the ouput PNG's size will be 384 x 272 pixels\n";
     cout << "       (same as a VICE screenshot). If there are at least 23 entries then the height will be ((n + 4) * 8) + 72 pixels.\n";
@@ -5030,7 +5189,7 @@ void ShowInfo()
     cout << "       one without borders.\n\n";   
 
     cout << "       - Borderless images must have a width of exactly 16 characters (128 pixels) and the height must be a multiple\n";
-    cout << "       of 8 pixels. Images can only contain directory entries without entry type. Directory header is not allowed.\n\n";
+    cout << "       of 8 pixels. Images can only contain directory entries without a directory header and entry type identifiers.\n\n";
 
     cout << "       - Images with borders must have a width of 384 pixels where the border is 32 pixels on each side. The height\n";
     cout << "       must include a 35-pixel top and a 37-pixel bottom border (as in VICE). The \"screen\" portion of the image\n";
@@ -5048,7 +5207,7 @@ void ShowInfo()
 
     cout << "dart MyDirArt.pet\n\n";
 
-    cout << "DART will create MyDirArt_out.d64 (if it doesn't already exist), and will import all DirArt entries from MyDirArt.pet\n";
+    cout << "DART will create MyDirArt_dart.d64 (if it doesn't already exist) and will import all DirArt entries from MyDirArt.pet\n";
     cout << "into it, overwriting all existing directory entries, using del as entry type.\n\n";
 
     cout << "Example 2:\n";
@@ -5081,7 +5240,7 @@ void ShowInfo()
 
     cout << "dart MyDirArt.d64 -o MyDirArt1.png -p 18\n\n";
 
-    cout << "DART will import the DirArt from a D64 file and convert it to a PNG, using palette 18 (Pixcen).\\nn";
+    cout << "DART will import the DirArt from a D64 file and convert it to a PNG, using palette 18 (Pixcen).\n\n";
     
     cout << "DART uses the LodePNG library by Lode Vandevenne (http://lodev.org/lodepng/) to encode and decode PNG files,\n";
     cout << "and gif.h by Charlie Tangora (https://github.com/charlietangora/gif-h) to create animated GIFs.\n\n";
@@ -5101,9 +5260,9 @@ int main(int argc, char* argv[])
     {
 
     #ifdef DEBUG
-        InFileName = "c:/dart/test/png_1bit.png";
-        OutFileName = "c:/dart/test.png";
-        argSkippedEntries = "all";
+        InFileName = "c:/dart/test/anim/lmdf.d64";
+        OutFileName = "c:/dart/lmdf.png";
+        //argSkippedEntries = "all";
         argEntryType = "del";
         //argPalette = "18";
     #else
@@ -5146,7 +5305,7 @@ int main(int argc, char* argv[])
             }
             else
             {
-                cerr << "***CRITICAL***\tMissing [output.d64] parameter.\n";
+                cerr << "***ABORT***\tMissing option -o [output.d64] value.\n";
                 return EXIT_FAILURE;
             }
         }
@@ -5156,14 +5315,14 @@ int main(int argc, char* argv[])
             {
                 argDiskName = args[++i];
 
-                for (int j = 0; j < 16; j++)
-                {
-                    argDiskName += 0xa0;
-                }
+                //for (int j = 0; j < 16; j++)
+                //{
+                    //argDiskName += 0xa0;
+                //}
             }
             else
             {
-                cerr << "***CRITICAL***\tMissing [disk name] parameter.\n";
+                cerr << "***ABORT***\tMissing option -n [disk name] value.\n";
                 return EXIT_FAILURE;
             }
         }
@@ -5173,14 +5332,14 @@ int main(int argc, char* argv[])
             {
                 argDiskID = args[++i];
 
-                for (int j = 0; j < 5; j++)
-                {
-                    argDiskID += 0xa0;
-                }
+                //for (int j = 0; j < 5; j++)
+                //{
+                    //argDiskID += 0xa0;
+                //}
             }
             else
             {
-                cerr << "***CRITICAL***\tMissing [disk id] parameter.\n";
+                cerr << "***ABORT***\tMissing option -i [disk id] value.\n";
                 return EXIT_FAILURE;
             }
         }
@@ -5192,7 +5351,7 @@ int main(int argc, char* argv[])
             }
             else
             {
-                cerr << "***CRITICAL***\tMissing [skipped entries] parameter.\n";
+                cerr << "***ABORT***\tMissing option -s [skipped entries] value.\n";
                 return EXIT_FAILURE;
             }
         }
@@ -5204,7 +5363,7 @@ int main(int argc, char* argv[])
             }
             else
             {
-                cerr << "***CRITICAL***\tMissing [default entry type] parameter.\n";
+                cerr << "***ABORT***\tMissing option -t [default entry type] value.\n";
                 return EXIT_FAILURE;
             }
         }
@@ -5216,7 +5375,7 @@ int main(int argc, char* argv[])
             }
             else
             {
-                cerr << "***CRITICAL***\tMissing [first imported entry] parameter.\n";
+                cerr << "***ABORT***\tMissing option -f [first imported entry] value.\n";
                 return EXIT_FAILURE;
             }
         }
@@ -5228,7 +5387,7 @@ int main(int argc, char* argv[])
             }
             else
             {
-                cerr << "***CRITICAL***\tMissing [last imported entry] parameter.\n";
+                cerr << "***ABORT***\tMissing option -l [last imported entry] value.\n";
                 return EXIT_FAILURE;
             }
         }
@@ -5240,13 +5399,13 @@ int main(int argc, char* argv[])
             }
             else
             {
-                cerr << "***CRITICAL***\tMissing [palette] parameter.\n";
+                cerr << "***ABORT***\tMissing option -p [palette] value.\n";
                 return EXIT_FAILURE;
             }
         }
         else
         {
-            cerr << "***CRITICAL***\tUnrecognized option: " << args[i] << "\n";
+            cerr << "***ABORT***\tUnrecognized option: " << args[i] << "\n";
             return EXIT_FAILURE;
         }
         i++;
@@ -5254,7 +5413,7 @@ int main(int argc, char* argv[])
     
     if (InFileName.empty())
     {
-        cerr << "***CRITICAL***\tMissing input file name!\n";
+        cerr << "***ABORT***\tMissing input file name!\n";
         return EXIT_FAILURE;
     }
 
@@ -5276,7 +5435,7 @@ int main(int argc, char* argv[])
         }
         else
         {
-            cerr << "***CRITICAL***\tUnrecognized [skipped entries] parameter!\n";
+            cerr << "***ABORT***\tUnrecognized option -s [skipped entries] value!\n";
             return EXIT_FAILURE;
         }
     }
@@ -5340,7 +5499,7 @@ int main(int argc, char* argv[])
     }
     else
     {
-        cerr << "***CRITICAL***\tUnrecognized default file type parameter!\n";
+        cerr << "***ABORT***\tUnrecognized default file type parameter!\n";
         return EXIT_FAILURE;
     }
 
@@ -5352,7 +5511,7 @@ int main(int argc, char* argv[])
         }
         else
         {
-            cerr << "***CRITICAL***\tThe [first imported entry] parameter must be numeric.\n";
+            cerr << "***ABORT***\tThe value of option -f [first imported entry] must be numeric.\n";
             return EXIT_FAILURE;
         }
     }
@@ -5369,7 +5528,7 @@ int main(int argc, char* argv[])
         }
         else
         {
-            cerr << "***CRITICAL***\tThe [last imported entry] parameter must be numeric.\n";
+            cerr << "***ABORT***\tThe value of option -l [last imported entry] must be numeric.\n";
             return EXIT_FAILURE;
         }
     }
@@ -5380,7 +5539,7 @@ int main(int argc, char* argv[])
 
     if (!fs::exists(InFileName))
     {
-        cerr << "***CRITICAL***The following DirArt file does not exist:\n\n" << InFileName << "\n";
+        cerr << "***ABORT***The following DirArt file does not exist:\n\n" << InFileName << "\n";
         return EXIT_FAILURE;
     }
 
@@ -5391,13 +5550,13 @@ int main(int argc, char* argv[])
             PaletteIdx = ConvertStringToInt(argPalette);
             if ((PaletteIdx < 0) || (PaletteIdx >= NumPalettes))
             {
-                cerr << "***CRITICAL***\tThe [palette] parameter must have a value between 00-22.\n";
+                cerr << "***ABORT***\tOption -p [palette] must have a value between 00-22.\n";
                 return EXIT_FAILURE;
             }
         }
         else
         {
-            cerr << "***CRITICAL***\tThe [palette] parameter must have a numeric value.\n";
+            cerr << "***ABORT***\tOption -p [palette] must have a numeric value.\n";
             return EXIT_FAILURE;
         }
     }
@@ -5436,7 +5595,7 @@ int main(int argc, char* argv[])
     if (OutFileName.empty())
     {
         //Output file name not provided, use input file name without its extension to create output d64 file name
-        OutFileName = InFileName.substr(0, InFileName.size() - DirArtType.size() - 1) + "_out.d64";
+        OutFileName = InFileName.substr(0, InFileName.size() - DirArtType.size() - 1) + "_dart.d64";
     }
 
     for (int i = OutFileName.length() - 1; i >= 0; i--)
@@ -5460,7 +5619,7 @@ int main(int argc, char* argv[])
 
     if ((OutputType != "png") && (OutputType != "gif") && (OutputType != "d64"))
     {
-        cout << "***CRITICAL***\tUnrecognized output file type: " << OutFileName << "\n";
+        cerr << "***ABORT***\tUnrecognized output file type: " << OutFileName << "\n";
         return EXIT_FAILURE;
     }
 
@@ -5480,7 +5639,7 @@ int main(int argc, char* argv[])
         Msg = "Importing DirArt entries: all\n";
     }
 
-    if (OutputType == "d64")
+    if ((OutputType == "d64") && (DirArtType != "asm"))
     {
         if (AppendMode)
         {
@@ -5575,17 +5734,31 @@ int main(int argc, char* argv[])
     {
         if (!argDiskName.empty())
         {
-            for (int i = 0; i < 16; i++)
+            for (size_t i = 0; i < 16; i++)
             {
-                Disk[Track[18] + 0x90 + i] = Ascii2DirArt[toupper(argDiskName[i])];
+                if (i < argDiskName.size())
+                {
+                    Disk[Track[18] + 0x90 + i] = Ascii2DirArt[toupper(argDiskName[i])];
+                }
+                else
+                {
+                    Disk[Track[18] + 0x90 + i] = 0xa0;
+                }
             }
         }
 
         if (!argDiskID.empty())
         {
-            for (int i = 0; i < 5; i++)
+            for (size_t i = 0; i < 5; i++)
             {
-                Disk[Track[18] + 0xa2 + i] = Ascii2DirArt[toupper(argDiskID[i])];
+                if (i < argDiskID.size())
+                {
+                    Disk[Track[18] + 0xa2 + i] = Ascii2DirArt[toupper(argDiskID[i])];
+                }
+                else
+                {
+                    Disk[Track[18] + 0xa2 + i] = 0xa0;
+                }
             }
         }
     }
@@ -5596,23 +5769,10 @@ int main(int argc, char* argv[])
         {
             return EXIT_FAILURE;
         }
-
-        int NumFreeSectors = Disk[Track[DirTrack] + (size_t)(18 * 4)];
-        NumFreeEntries = NumFreeSectors * 8;
-
-        if ((DirTrack == 0) && (DirPos != 0))
-        {
-            for (int i = DirPos + 32; i < 256; i += 32)
-            {
-                NumFreeEntries++;
-            }
-        }
-
-        cout << dec << NumFreeEntries << " directory entries remaining unused on track 18.\n";
     }
     else if (OutputType == "png")
     {
-        cout << "Converting DirArt to PNG using palette No. " << C64PaletteNames[PaletteIdx] << "...\n";
+        cout << "Converting DirArt to PNG using palette No. " << C64PaletteNames[PaletteIdx] << "\n";
         if (!ConvertD64ToPng())
         {
             return EXIT_FAILURE;
@@ -5628,7 +5788,34 @@ int main(int argc, char* argv[])
         }
         cout << "Done!\n";
     }
-    
+
+    if (NumDirEntries == MaxNumDirEntries)
+    {
+        cout << "\nNumber of directory entries has reached the maximum of " << (dec) << MaxNumDirEntries << ".\n";
+    }
+    else if (NumDirEntries > 0)
+    {
+        cout << "\nNumber of directory entries: " << (dec) << NumDirEntries << "\n";
+    }
+
+    int NumFreeSectors = 0;
+
+    if ((DirTrack == 18) && (DirPos != 0))
+    {
+        NumFreeSectors = Disk[Track[18] + (size_t)(18 * 4)];
+        NumFreeEntries = NumFreeSectors * 8;        for (int i = DirPos + 32; i < 256; i += 32)
+        {
+            NumFreeEntries++;
+        }
+    }
+
+    cout << "Directory entries remaining unused on track 18: " << dec << NumFreeEntries << "\n";
+
+    if ((DirTrack != 18) && (DirTrack != 0))
+    {
+        cout << "DirArt extends beyond track 18.\n";
+    }
+
     return EXIT_SUCCESS;
 }
     
