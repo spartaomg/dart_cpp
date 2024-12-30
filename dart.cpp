@@ -1,5 +1,5 @@
 
-#define DEBUG
+//#define DEBUG
 #define AddBlockCount
 
 #include "common.h"
@@ -8,6 +8,8 @@
 const int GifWidth = 384;
 const int GifHeight = 272;
 static uint8_t GifImage[GifWidth * GifHeight * 4];
+
+int GifFrameCount = 0;
 
 const int StdDiskSize = (664 + 19) * 256;
 const int ExtDiskSize = StdDiskSize + (85 * 256);
@@ -111,8 +113,10 @@ size_t Track[41]{};
 
 int ScreenLeft = 32;
 int ScreenTop = 35;
-int CharX = 0;  //ScreenLeft;
-int CharY = 0;  //ScreenTop;
+int CharX = 0;      // Virtual screen X
+int CharY = 0;      // Virtual screen Y
+int CursorX = 0;    // Screen X
+int CursorY = 0;    // Screen Y
 
 size_t ScrLeft = 0;
 size_t ScrTop = 0;
@@ -449,7 +453,6 @@ void SetPixel(size_t X, size_t Y, unsigned int Col)
     Image[Pos + 1] = G;
     Image[Pos + 2] = B;
     Image[Pos + 3] = A;
-
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
@@ -472,7 +475,6 @@ void SetGifPixel(int X, int Y, unsigned int Col)
         pixel[2] = B;
         pixel[3] = A;
     }
-
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
@@ -558,9 +560,10 @@ void OutputDel()
         ScrRam[(size_t)(CharY * 80) + 79] = 0x00;
         ColRam[(size_t)(CharY * 80) + 79] = 0xff;
     }
-    else
+    else if (CharY > 0)
     {
         CharY--;
+
         if (ScrRam[(size_t)(CharY * 80) + 40] != 0x00)
         {
             CharX = 79;
@@ -572,25 +575,17 @@ void OutputDel()
         ScrRam[(size_t)(CharY * 80) + CharX] = 0x00;
         ColRam[(size_t)(CharY * 80) + CharX] = 0xff;
     }
-    return;
-}
 
-//----------------------------------------------------------------------------------------------------------------------------------------------------
-
-void OutputCR()
-{
-    NumInserts = 0;
-    QuotedText = false;
-    //HeaderText = false;
-    InvertedText = false;
-    CharX = 0;
-    CharY++;
-
-    if (ColRam[(size_t)CharY * 80] == 0xff)
+    if (CursorX > 0)
     {
-        ScrRam[(size_t)CharY * 80] = 0x20;
-        ColRam[(size_t)CharY * 80] = CurrentColor;
+        CursorX--;
     }
+    else if (CursorY > 0)
+    {
+        CursorX = 39;
+        CursorY--;
+    }
+
 
     return;
 }
@@ -682,6 +677,39 @@ void OutputToScreen(unsigned char ThisChar)
         CharX = 0;
         CharY++;
     }
+
+    CursorX++;
+    if (CursorX == 40)
+    {
+        CursorX = 0;
+        if (CursorY < 24)
+        {
+            CursorY++;
+        }
+    }
+
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+void OutputCR()
+{
+    NumInserts = 0;
+    QuotedText = false;
+    //HeaderText = false;
+    InvertedText = false;
+    CharX = 0;
+    CharY++;
+    CursorX = 0;
+    if (CursorY < 24)
+    {
+        CursorY++;
+    }
+    OutputToScreen(0x20);
+    CharX = 0;
+    CursorX = 0;
+    
+    return;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
@@ -737,6 +765,8 @@ void chrout(unsigned char ThisChar)
                             //Home
                             CharX = 0;
                             CharY = 0;
+                            CursorX = 0;
+                            CursorY = 0;
                             return;
                         }
                         else if (ThisChar == 0x1d)
@@ -749,6 +779,16 @@ void chrout(unsigned char ThisChar)
                                 {
                                     CharX = 0;
                                     CharY++;
+                                }
+                            }
+                            
+                            CursorX++;
+                            if (CursorX == 40)
+                            {
+                                CursorX = 0;
+                                if (CursorY < 24)
+                                {
+                                    CursorY++;
                                 }
                             }
                             return;
@@ -776,6 +816,11 @@ void chrout(unsigned char ThisChar)
                             {
                                 ScrRam[CharY * 80] = 0x20;
                                 ColRam[CharY * 80] = CurrentColor;
+                            }
+
+                            if(CursorY < 24)
+                            {
+                                CursorY++;
                             }
 
                             return;
@@ -933,6 +978,10 @@ void chrout(unsigned char ThisChar)
                                         CharX += 40;
                                     }
                                 }
+                                if (CursorY > 0)
+                                {
+                                    CursorY--;
+                                }
                                 return;
                             }
                             else if (ThisChar == 0x12)
@@ -965,6 +1014,16 @@ void chrout(unsigned char ThisChar)
                                         }
                                     }
                                 }
+                                
+                                if (CursorX > 0)
+                                {
+                                    CursorX--;
+                                }
+                                else if (CursorY > 0)
+                                {
+                                    CursorX = 39;
+                                    CursorY--;
+                                }
                                 return;
                             }
                             else if (ThisChar == 0x13)
@@ -972,6 +1031,8 @@ void chrout(unsigned char ThisChar)
                                 //0x93 - clear screen
                                 CharX = 0;
                                 CharY = 0;
+                                CursorX = 0;
+                                CursorY = 0;
                                 for (size_t i = 0; i < ScrRam.size(); i++)
                                 {
                                     ScrRam[i] = 0x00;
@@ -1068,371 +1129,6 @@ void chrout(unsigned char ThisChar)
     }
 }
 
-
-//----------------------------------------------------------------------------------------------------------------------------------------------------
-/*
-void ChrOut(unsigned char PChar, bool ConvertToPetscii = false, bool Invert = false)
-{
-
-    if (!QuotedText)
-    {
-        if (PChar == 0x94)                         //INSERT
-        {
-            if ((CharX != 79) && ((ScrRam[(size_t)(CharY * 80) + 79] == 0x20) || (ScrRam[(size_t)(CharY * 80) + 79] == 0x00)))  //Last char of double line space and we are not on the last char
-            {
-                NumInserts++;   //count number of inserts
-
-                int MaxX = 38;
-                if ((ScrRam[(size_t)(CharY * 80) + 40] != 0x00) || ((ScrRam[(size_t)(CharY * 80) + 39] != 0x00) && (ScrRam[(size_t)(CharY * 80) + 39] != 0x20)))
-                {
-                    MaxX = 78;
-                }
-
-                for (int x = MaxX; x >= CharX; x--)
-                {
-                    ScrRam[(size_t)(CharY * 80) + x + 1] = ScrRam[(size_t)(CharY * 80) + x];
-                    ColRam[(size_t)(CharY * 80) + x + 1] = ColRam[(size_t)(CharY * 80) + x];
-                }
-
-                ScrRam[(size_t)(CharY * 80) + CharX] = 0x20;
-                ColRam[(size_t)(CharY * 80) + CharX] = CurrentColor;
-
-                //If we just pushed the last (non-space) char of the first halfline to the first pos in the second halfline then fill the rest of the second half line with space  
-                if ((ScrRam[(size_t)(CharY * 80) + 40] != 0x00) && (ScrRam[(size_t)(CharY * 80) + 41] == 0x00))
-                {
-                    for (int i = 41; i < 80; i++)
-                    {
-                        ScrRam[(size_t)(CharY * 80) + i] = 0x20;
-                        ColRam[(size_t)(CharY * 80) + i] = c64palettes[(PaletteIdx * 16) + 0x0e]; //light blue
-                    }
-                }
-            }
-            return;
-        }
-    }
-
-    if ((!QuotedText) && (NumInserts == 0))                //Check control codes outside quotes (after return or shift return)
-    {
-        if (PChar == 0x05)          //WHITE
-        {
-            CurrentColor = ColorWhite;
-            return;
-        }
-        else if (PChar == 0x1c)     //RED
-        {
-            CurrentColor = ColorRed;
-            return;
-        }
-        else if (PChar == 0x1e)     //GREEN
-        {
-            CurrentColor = ColorGreen;;
-            return;
-        }
-        else if (PChar == 0x1f)     //BLUE
-        {
-            CurrentColor =ColorBlue;
-            return;
-        }
-        else if (PChar == 0x81)     //ORANGE
-        {
-            CurrentColor = ColorOrange;
-            return;
-        }
-        else if (PChar == 0x90)     //BLACK
-        {
-            CurrentColor = ColorBlack;
-            return;
-        }
-        else if (PChar == 0x95)     //BROWN
-        {
-            CurrentColor = ColorBrown;
-            return;
-        }
-        else if (PChar == 0x96)     //PINK
-        {
-            CurrentColor = ColorPink;
-            return;
-        }
-        else if (PChar == 0x97)     //DARK GREY
-        {
-            CurrentColor = ColorDkGrey;
-            return;
-        }
-        else if (PChar == 0x98)     //MID GREY
-        {
-            CurrentColor = ColorMdGrey;
-            return;
-        }
-        else if (PChar == 0x99)     //LIGHT GREEN
-        {
-            CurrentColor = ColorLtGreen;
-            return;
-        }
-        else if (PChar == 0x9a)     //LIGHT BLUE
-        {
-            CurrentColor = ColorLtBlue;
-            return;
-        }
-        else if (PChar == 0x9b)     //LIGHT GREY
-        {
-            CurrentColor = ColorLtGrey;
-            return;
-        }
-        else if (PChar == 0x9c)     //PURPLE
-        {
-            CurrentColor = ColorPurple;
-            return;
-        }
-        else if (PChar == 0x9e)     //YELLOW
-        {
-            CurrentColor = ColorYellow;
-            return;
-        }
-        else if (PChar == 0x9f)     //CYAN
-        {
-            CurrentColor = ColorCyan;
-            return;
-        }
-        else if (PChar == 0x12)     //REVERSE ON
-        {
-            InvertedText = true;
-            return;
-        }
-        else if (PChar == 0x92)     //REVERSE OFF
-        {
-            InvertedText = false;
-            return;
-        }
-        else if (PChar == 0x08)
-        {
-            CharSetSwitchEnabled = false;
-            return;
-        }
-        else if (PChar == 0x09)
-        {
-            CharSetSwitchEnabled = true;
-            return;
-        }
-        else if ((PChar == 0x0e) && (CharSetSwitchEnabled))     //LOWER CASE CHARSET
-        {
-            CharSet = 1;
-            return;
-        }
-        else if ((PChar == 0x8e) && (CharSetSwitchEnabled))     //UPPER CASE CHARSET
-        {
-            CharSet = 0;
-            return;
-        }
-        else if (PChar == 0x93)     //CLEAR SCREEN
-        {
-            CharX = 0;
-            CharY = 0;
-            for (size_t i = 0; i < ScrRam.size(); i++)
-            {
-                ScrRam[i] = 0x00;
-                ColRam[i] = 0xff;
-            }
-            //ColRam[0] = CurrentColor;
-            return;
-        }
-        else if (PChar == 0x11)     //CURSOR DOWN
-        {
-            //Crsr down -> check if this is a double line, if yes step to next half otherwise step to next line          
-            CharX += 40;
-
-            if (CharX >= 80)        //First half line
-            {
-                CharX -= 80;
-                CharY++;
-            }
-            else
-            {
-                if (ScrRam[(size_t)(CharY * 80) + 40] == 0x00)  //Second half line - check if empty and step to next first half line if it is empty
-                {
-                    CharX -= 40;
-                    CharY++;
-                }
-            }
-
-            if (ColRam[CharY * 80] == 0xff)
-            {
-                ScrRam[CharY * 80] = 0x20;
-                ColRam[CharY * 80] = CurrentColor;
-            }
-
-            return;
-        }
-        else if (PChar == 0x91)     //CURSOR UP
-        {
-            if (CharX >= 40)        //Bug fix based on the dir art of Desp-AI-r.d64
-            {
-                CharX -= 40;
-            }
-            else if (CharY > 0)
-            {
-                CharY--;
-                if (ScrRam[(size_t)(CharY * 80) + 40] != 00)
-                {
-                    CharX += 40;
-                }
-            }
-            return;
-        }
-        else if (PChar == 0x13)     //HOME
-        {
-            CharX = 0;
-            CharY = 0;
-            return;
-            }
-        else if (PChar == 0x1d)     //CURSOR RIGHT
-        {
-            CharX++;
-            if (CharX == 40)
-            {
-                if (ScrRam[(size_t)(CharY * 80) + CharX] == 0x00)
-                {
-                    CharX = 0;
-                    CharY++;
-                }
-            }
-            return;
-        }
-        else if (PChar == 0x9d)     //CURSOR LEFT
-        {
-            CharX--;
-            if (CharX < 0)
-            {
-                if (CharY == 0)
-                {
-                    CharX = 0;
-                    return;
-                }
-                else
-                {
-                    CharY--;
-                    if (ScrRam[(size_t)(CharY * 80) + 40] == 0x00)
-                    {
-                        CharX = 39;
-                    }
-                    else
-                    {
-                        CharX = 79;
-                    }
-                }
-            }
-            return;
-        }
-        else if ((PChar == 0x80) || (PChar == 0x82) || (PChar == 0x84) || (PChar == 0x8f) || (PChar == 0x04) || (PChar < 0x03) || (PChar == 0x06) || (PChar == 0x07) || (PChar == 0x0f) || (PChar == 0x10))
-        {
-            return;
-        }
-        else if ((PChar >= 0x0a) && (PChar <= 0x0c))
-        {
-            return;
-        }
-        else if ((PChar >= 0x15) && (PChar <= 0x1b))
-        {
-            return;
-        }
-        else if ((PChar >= 0x85) && (PChar <= 0x8c))
-        {
-            return;
-        }
-    }
-    
-    //-------------------------------------
-
-    if ((PChar == 0x0d) || (PChar == 0x8d))         //RETURN, SHIFT+RETURN
-    {
-        NumInserts = 0;
-        QuotedText = false;
-        HeaderText = false;
-        InvertedText = false;
-        CharX = 0;
-        CharY++;
-
-        if (ColRam[CharY * 80] == 0xff)
-        {
-            ScrRam[CharY * 80] = 0x20;
-            ColRam[CharY * 80] = CurrentColor;
-        }
-
-        return;
-    }
-    else if ((PChar == 0xa0) && (!HeaderText))      //END OF DIR ENTRY
-    {
-        NumExtraSpaces++;       //We will need to correct the entry length after the end-qoute
-        return;
-    }
-    else if (PChar == 0x14)                         //DELETE - ALSO WORKS WITHIN QUOTES
-    {
-        if (CharX > 0)
-        {
-            CharX--;
-            for (size_t x = CharX; x < 78; x++)
-            {
-                ScrRam[(size_t)(CharY * 80) + x] = ScrRam[(size_t)(CharY * 80) + x + 1];
-                ColRam[(size_t)(CharY * 80) + x] = ColRam[(size_t)(CharY * 80) + x + 1];
-            }
-            ScrRam[(size_t)(CharY * 80) + 79] = 0x00;
-            ColRam[(size_t)(CharY * 80) + 79] = 0xff;
-        }
-        else
-        {
-            CharY--;
-            if (ScrRam[(size_t)(CharY * 80) + 40] != 0x00)
-            {
-                CharX = 79;
-            }
-            else
-            {
-                CharX = 39;
-            }
-            ScrRam[(size_t)(CharY * 80) + CharX] = 0x00;
-            ColRam[(size_t)(CharY * 80) + CharX] = 0xff;
-        }
-        return;
-    }
-    else
-    {
-        if (ConvertToPetscii)                       //REGULAR CHARS
-        {
-            PChar = Char2Petscii[PChar];
-        }
-
-        if (((Invert) && (HeaderText)) || (InvertedText))   //Invert char if we are in the header or if "reverse" is on. ToDo - remove redundancies here
-        {
-            PChar |= 0x80;
-        }
-
-        size_t Pos = (size_t)(CharY * 80) + CharX;
-
-        if (Pos >= ScrRam.size())
-        {
-            ScrRam.resize((size_t)(CharY + 1) * 80);
-            ColRam.resize((size_t)(CharY + 1) * 80);
-
-            for (size_t i = ScrRam.size() - 80; i < ScrRam.size(); i++)
-            {
-                ScrRam[i] = 0x00;
-                ColRam[i] = 0xff;
-            }
-        }
-
-        ScrRam[Pos] = PChar;
-        ColRam[Pos] = CurrentColor;
-
-        CharX++;
-
-        if (NumInserts > 0)
-        {
-            NumInserts--;
-        }
-
-    }
-
-}
-*/
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
 bool CreatePng()
@@ -1587,6 +1283,26 @@ int CalcNumEntries()
 
 void CreateGifFrame()
 {
+/*
+    string BinName = "C:/Dart/AnimFrames/GifScr_";
+    unsigned char B;
+    int GFC = GifFrameCount++;
+    
+    B = 0x30+(GFC / 1000);
+    BinName += B;
+    GFC %= 1000;
+    B = 0x30 + (GFC / 100);
+    BinName += B;
+    GFC %= 100;
+    B = 0x30 + (GFC / 10);
+    BinName += B;
+    GFC %= 10;
+    B = 0x30 + GFC;
+    BinName += B;
+    BinName += ".bin";
+
+    WriteBinaryFile(BinName,ScrRam);
+*/
     size_t FirstEntryPos = 0;
     size_t LastEntryPos = ScrRam.size();
 
@@ -1715,34 +1431,15 @@ bool ConvertD64ToGif()
         ScrRam[i] = 0x00;   //Unused Petscii code - indicates that the line is unused
         ColRam[i] = 0xff;   //Unused color code - no color change needed
     }
-    //          01234567890123456789012345678901234567890123456789012345678901234567890123456789
-    string S = "                                            **** COMMODORE 64 BASIC V2 ****";
-
+    
     unsigned int B = 0;
     CharX = 0;
     CharY = 0;
-    
-    for (size_t i = 0; i < S.length(); i++)
-    {
-        B = S[i];
-        chrout(B);
-    }
 
     chrout(0x0d);
 
-    //   01234567890123456789012345678901234567890123456789012345678901234567890123456789
-    S = "                                         64K RAM SYSTEM  38911 BASIC BYTES FREE";
-
-    for (size_t i = 0; i < S.length(); i++)
-    {
-        B = S[i];
-        chrout(B);
-    }
-
-    chrout(0x0d);
-
-    //   01234567890123456789012345678901234567890123456789012345678901234567890123456789
-    S = "                                        READY";
+    //          0123456789012345678901234567890123456789
+    string S = "    **** COMMODORE 64 BASIC V2 ****";
 
     for (size_t i = 0; i < S.length(); i++)
     {
@@ -1751,8 +1448,32 @@ bool ConvertD64ToGif()
     }
 
     chrout(0x0d);
+    chrout(0x0d);
 
-    //   01234567890123456789012345678901234567890123456789012345678901234567890123456789
+    //   0123456789012345678901234567890123456789
+    S = " 64K RAM SYSTEM  38911 BASIC BYTES FREE";
+
+    for (size_t i = 0; i < S.length(); i++)
+    {
+        B = S[i];
+        chrout(B);
+    }
+
+    chrout(0x0d);
+    chrout(0x0d);
+
+    //   0123456789012345678901234567890123456789
+    S = "READY";
+
+    for (size_t i = 0; i < S.length(); i++)
+    {
+        B = S[i];
+        chrout(B);
+    }
+
+    chrout(0x0d);
+
+    //   0123456789012345678901234567890123456789
     S = "LOAD\"$\",8";
 
     for (size_t i = 0; i < S.length(); i++)
@@ -1762,9 +1483,10 @@ bool ConvertD64ToGif()
     }
 
     chrout(0x0d);
+    chrout(0x0d);
 
-    //   01234567890123456789012345678901234567890123456789012345678901234567890123456789
-    S = "                                        SEARCHING FOR $";
+    //   0123456789012345678901234567890123456789
+    S = "SEARCHING FOR $";
 
     for (size_t i = 0; i < S.length(); i++)
     {
@@ -1774,8 +1496,8 @@ bool ConvertD64ToGif()
 
     chrout(0x0d);
 
-    //   01234567890123456789012345678901234567890123456789012345678901234567890123456789
-    S = "LOADING                                 READY";
+    //   0123456789012345678901234567890123456789
+    S = "LOADING";
 
     for (size_t i = 0; i < S.length(); i++)
     {
@@ -1785,7 +1507,18 @@ bool ConvertD64ToGif()
 
     chrout(0x0d);
 
-    //   01234567890123456789012345678901234567890123456789012345678901234567890123456789
+    //   0123456789012345678901234567890123456789
+    S = "READY";
+
+    for (size_t i = 0; i < S.length(); i++)
+    {
+        B = S[i];
+        chrout(B);
+    }
+
+    chrout(0x0d);
+
+    //   0123456789012345678901234567890123456789
     S = "LIST";
 
     for (size_t i = 0; i < S.length(); i++)
@@ -1966,6 +1699,9 @@ bool ConvertD64ToGif()
                 chrout(B);
             }
 
+            CreateGifFrame();
+            GifWriteFrame(&Gif, GifImage, GifWidth, GifHeight, 2);
+
             chrout(0x0d);
         }
         DirPos += 32;
@@ -1982,8 +1718,13 @@ bool ConvertD64ToGif()
                 DirPos = 0;
             }
         }
-        CreateGifFrame();
-        GifWriteFrame(&Gif, GifImage, GifWidth, GifHeight, 2);
+        
+        if (CursorY == 24)
+        {
+            CreateGifFrame();
+            GifWriteFrame(&Gif, GifImage, GifWidth, GifHeight, 2);
+        }
+
         if (FrameCount % 10 == 0)
         {
             cout << ".";
@@ -2024,10 +1765,16 @@ bool ConvertD64ToGif()
         chrout(B);
     }
 
-    chrout(0x0d);
-
     CreateGifFrame();
     GifWriteFrame(&Gif, GifImage, GifWidth, GifHeight, 2);
+
+    chrout(0x0d);
+
+    if (CursorY == 24)
+    {
+        CreateGifFrame();
+        GifWriteFrame(&Gif, GifImage, GifWidth, GifHeight, 2);
+    }
 
     string ReadyMsg = "READY.";
 
@@ -5260,8 +5007,8 @@ int main(int argc, char* argv[])
     {
 
     #ifdef DEBUG
-        InFileName = "c:/dart/test/anim/lmdf.d64";
-        OutFileName = "c:/dart/lmdf.png";
+        InFileName = "c:/dart/test/asm3.asm";
+        //OutFileName = "c:/dart/lmdf.png";
         //argSkippedEntries = "all";
         argEntryType = "del";
         //argPalette = "18";
