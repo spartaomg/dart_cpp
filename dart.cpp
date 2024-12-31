@@ -28,7 +28,7 @@ vector <unsigned char> ColRam;
 //command line parameters
 string InFileName = "";
 string OutFileName = "";
-string argSkippedEntries = "";
+string argSkippedEntries = "0";
 string argEntryType = "DEL";
 string argFirstImportedEntry = "";
 string argLastImportedEntry = "";
@@ -126,7 +126,7 @@ size_t ScrHeight = 0;
 bool HasBorders = false;
 
 int NumDirEntries = 0;
-int MaxNumDirEntries = ((0xa000 - 0x800) / 0x20) - 2;   //1213 + header + blocks free, this fills up the whole BASIC RAM
+int MaxNumDirEntries = ((0xa000 - 0x800) / 0x20) - 2;   //1214 + header + blocks free, this fills up the whole BASIC RAM
 
 #ifdef DEBUG
     int ThisDirEntry = 0;
@@ -2412,64 +2412,124 @@ void DeleteOldDir()
 */
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
-bool ResetDirEntries()
+bool SkipDirEntries()
 {
     DirTrack = 18;
     DirSector = 1;
     DirPos = 0;
 
-    int n = 0;
-
-    while (n < NumSkippedEntries)
-    {
-        FindNextDirPos();
-        if (DirPos == 0)
-        {
-            cerr << "***ABORT***\tUnable to skip " << NumSkippedEntries << "entries!\n";
-            return false;
-        }
-
-        if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos] != 0)
-        {
-            n++;
-        }
-        else
-        {
-            NumSkippedEntries = n;  //we have reached the end of the directory, this is th next empty directory slot
-            cout << "***INFO***\tSkipping the whole existing directory. Switching to Append Mode.\n";
-            AppendMode = true;
-            return true;
-        }
-    }
-
-    //Here DirPos should point at the first dir entry that we will overwrite
-
-    int i = (DirPos != 0) ? DirPos : 2;
     size_t DT = DirTrack;
     size_t DS = DirSector;
 
-    while (i != 0)
-    {
-        i += 32;
+    if (NumSkippedEntries > 0)
+    {       
+        //We are looking for the last sector and DirPos to be skipped, FindNextDirPos will find the first unused one
 
-        if (i > 256)
+        int NumSkippedSectors = (NumSkippedEntries - 1) / 8;       
+        
+        DirPos = 2 + ((NumSkippedEntries - 1) % 8) * 32;      //Last used entry to be skipped
+
+        //Skip max. NumSkippedEntries number of entries
+
+        if (NumSkippedSectors > 0)
         {
-            if ((Disk[Track[DT] + (DS * 256) + 0] > 0) && (Disk[Track[DT] + (DS * 256) + 0] < 36))
+            while (NumSkippedSectors > 0)
             {
-                DT = Disk[Track[DT] + (DS * 256) + 0];
-                DS = Disk[Track[DT] + (DS * 256) + 1];
-                i = 2;
+                DT = Disk[Track[DirTrack] + (DirSector * 256) + 0];
+                DS = Disk[Track[DirTrack] + (DirSector * 256) + 1];
+
+                if ((DT > 0) && (DT < 41))   //Valid track number
+                {
+                    DirTrack = DT;
+                    DirSector = DS;
+                    NumSkippedSectors--;
+                    NumDirEntries += 8;
+                }
+                else
+                {
+                    //Less sectors are used than what we want to skip
+                    //We are on the last used dir track, find last used DirPos
+
+                    DirPos = 7 * 32 + 2;
+                    while ((Disk[Track[DirTrack] + (DirSector * 256) + DirPos] == 0) && (DirPos > 0))
+                    {
+                        DirPos -= 32;
+                    }
+
+                    if (DirPos < 0)
+                        DirPos = 0;
+
+                    AppendMode = true;
+                    NumDirEntries += 1 + (DirPos == 0 ? 0 : (DirPos - 2) / 32);
+                    return true;
+                }
             }
-            else
+
+            NumDirEntries += 1 + (DirPos == 0 ? 0 : (DirPos - 2) / 32);
+        }
+        else
+        {
+            while ((Disk[Track[DirTrack] + (DirSector * 256) + DirPos] == 0) && (DirPos > 0))
             {
-                break;
+                AppendMode = true;
+                DirPos -= 32;
             }
+
+            if (DirPos < 0)
+                DirPos = 0;
+
         }
 
-        Disk[Track[DT] + (DS * 256) + i] = 0;          //Delete file type indicator
-        for (int j = i + 3; j < i + 30; j++)
+        NumDirEntries = (DirPos == 0 ? 0 : (DirPos - 2) / 32) + 1;
+
+        if (AppendMode)
+            return true;
+
+    }
+
+    //Last used entry to be skipped found - now clear the rest of the existing directory
+
+    bool Finished = false;
+
+    DT = DirTrack;
+    DS = DirSector;
+
+    unsigned char NT = Disk[Track[DirTrack] + (DirSector * 256) + 0];
+    unsigned char NS = Disk[Track[DirTrack] + (DirSector * 256) + 1];
+
+    size_t i = (DirPos != 0) ? DirPos + 32  : 2;
+
+    unsigned char SectorValue = 0xff;
+
+    while (!Finished)
+    {
+        while (i < 256)
         {
-            Disk[Track[DT] + (DS * 256) + j] = 0;      //Delete dir entry's name and block size, skipping T:S pointer
+            Disk[Track[DT] + (DS * 256) + i++] = 0;
+        }
+
+        i = 0;
+
+        Disk[Track[DT] + (DS * 256) + 0] = 0;
+        Disk[Track[DT] + (DS * 256) + 1] = SectorValue;
+        
+        if (SectorValue == 0)
+        {
+            MarkSectorAsFree(DT, DS);
+        }
+        
+        SectorValue = 0;       
+
+        if ((NT != 0) && (NT < 41))
+        {
+            DT = NT;
+            DS = NS;
+            NT = Disk[Track[DT] + (DS * 256) + 0];
+            NS = Disk[Track[DT] + (DS * 256) + 1];
+        }
+        else
+        {
+            Finished = true;
         }
     }
 
@@ -3492,18 +3552,25 @@ bool AddAsmDiskParameters()
         }
         else
         {
-            cout << "Import mode: Overwrite";
-            if (NumSkippedEntries > 0)
+            if (!SkipDirEntries())
+                return false;    //Currently there is no failure mode in SkipDirEntries()...
+
+            if (AppendMode)
             {
-                cout << ", skipping " + argSkippedEntries + " directory " + ((NumSkippedEntries == 1) ? "entry in " : "entries in ") + OutFileName + "\n";
+                cout << "Import mode: Append, skipping all " + to_string(NumDirEntries) + " existing directory entries in " + OutFileName + "\n";
             }
             else
             {
-                cout << "\n";
+                cout << "Import mode: Overwrite";
+                if (NumSkippedEntries > 0)
+                {
+                    cout << ", skipping " + argSkippedEntries + " directory " + ((NumSkippedEntries == 1) ? "entry in " : "entries in ") + OutFileName + "\n";
+                }
+                else
+                {
+                    cout << "\n";
+                }
             }
-
-            if (!ResetDirEntries())
-                return false;
         }
     }
 
@@ -4958,8 +5025,8 @@ void ShowInfo()
     cout << "PNG  - Portable Network Graphics image file. Image input files can only use two colors (background and foreground).\n";
     cout << "       DART will try to identify the colors by looking for a space character. If none found, it will use the darker\n";
     cout << "       of the two colors as background color. Image files must display the uppercase charset and their appearance\n";
-    cout << "       cannot rely on command characters. DART accepts two input image formats: one with (VICE) borders and another\n"; 
-    cout << "       one without borders.\n\n";   
+    cout << "       cannot rely on command characters. DART accepts two input image formats: one without boders and another one\n"; 
+    cout << "       with (VICE) borders.\n\n";   
 
     cout << "       - Borderless images must have a width of exactly 16 characters (128 pixels) and the height must be a multiple\n";
     cout << "       of 8 pixels. Images can only contain directory entries without a directory header and entry type identifiers.\n\n";
@@ -5033,9 +5100,10 @@ int main(int argc, char* argv[])
     {
 
     #ifdef DEBUG
-        InFileName = "c:/dart/test/anim/tna.d64";
-        OutFileName = "c:/dart/tna.gif";
-        //argSkippedEntries = "all";
+        InFileName = "c:/dart/test/output/art1.png";
+        OutFileName = "c:/dart/test.d64";
+        argSkippedEntries = "8";
+        argFirstImportedEntry = "16";
         argEntryType = "del";
         argPalette = "18";
     #else
@@ -5424,18 +5492,25 @@ int main(int argc, char* argv[])
         }
         else
         {
-            Msg += "Import mode: Overwrite";
-            if (NumSkippedEntries > 0)
+            if (!SkipDirEntries())
+                return EXIT_FAILURE;    //Currently there is no failure mode in SkipDirEntries()...
+
+            if (AppendMode)
             {
-                Msg += ", skipping " + argSkippedEntries + " directory " + ((NumSkippedEntries == 1) ? "entry in " : "entries in ") + OutFileName + "\n";
+                Msg += "Import mode: Append, skipping all " + to_string(NumDirEntries) + " existing directory entries in " + OutFileName + "\n";
             }
             else
             {
-                Msg += "\n";
+                Msg += "Import mode: Overwrite";
+                if (NumSkippedEntries > 0)
+                {
+                    Msg += ", skipping " + argSkippedEntries + " directory " + ((NumSkippedEntries == 1) ? "entry in " : "entries in ") + OutFileName + "\n";
+                }
+                else
+                {
+                    Msg += "\n";
+                }
             }
-
-            if (!ResetDirEntries())
-                return EXIT_FAILURE;
         }
     }
 
@@ -5586,7 +5661,7 @@ int main(int argc, char* argv[])
         }
     }
 
-    cout << "Directory entries remaining unused on track 18: " << dec << NumFreeEntries << "\n";
+    cout << "Directory entry slots remaining unused on track 18: " << dec << NumFreeEntries << "\n";
 
     if ((DirTrack != 18) && (DirTrack != 0))
     {
