@@ -5092,7 +5092,7 @@ int main(int argc, char* argv[])
 {
     cout << "\n";
     cout << "*********************************************************\n";
-    cout << "DART 1.4 - Directory Art Importer by Sparta (C) 2022-2024\n";
+    cout << "DART 1.4 - Directory Art Importer by Sparta (C) 2022-2025\n";
     cout << "*********************************************************\n";
     cout << "\n";
 
@@ -5146,7 +5146,7 @@ int main(int argc, char* argv[])
             }
             else
             {
-                cerr << "***ABORT***\tMissing option -o [output.d64] value.\n";
+                cerr << "***ABORT***\tMissing option -o [output.d64/output.png/output.gif] value.\n";
                 return EXIT_FAILURE;
             }
         }
@@ -5156,10 +5156,6 @@ int main(int argc, char* argv[])
             {
                 argDiskName = args[++i];
 
-                //for (int j = 0; j < 16; j++)
-                //{
-                    //argDiskName += 0xa0;
-                //}
             }
             else
             {
@@ -5173,10 +5169,6 @@ int main(int argc, char* argv[])
             {
                 argDiskID = args[++i];
 
-                //for (int j = 0; j < 5; j++)
-                //{
-                    //argDiskID += 0xa0;
-                //}
             }
             else
             {
@@ -5340,7 +5332,7 @@ int main(int argc, char* argv[])
     }
     else
     {
-        cerr << "***ABORT***\tUnrecognized default file type parameter!\n";
+        cerr << "***ABORT***\tUnrecognized option -t [default file type] value!\n";
         return EXIT_FAILURE;
     }
 
