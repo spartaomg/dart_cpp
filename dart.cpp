@@ -4917,7 +4917,8 @@ void CreateTrackTable()
 
 void ShowInfo()
 {
-    cout << "DART is a simple command-line tool that imports directory art from a variety of source file types to D64 disk images.\n\n";
+    cout << "DART is a command-line tool that imports C64 directory art from a variety of source file types to D64 disk images.\n";
+    cout << "It can also create PNG and animated GIF outputs of the directory art.\n\n";
 
     cout << "Usage:\n";
     cout << "------\n";
