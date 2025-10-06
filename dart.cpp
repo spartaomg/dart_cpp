@@ -62,22 +62,22 @@ unsigned int FGCol = 0;
 
 int PaletteIdx = 16;
 
-int ColorBlack = 0;
-int ColorWhite = 1;
-int ColorRed = 2;
-int ColorCyan = 3;
-int ColorPurple = 4;
-int ColorGreen = 5;
-int ColorBlue = 6;
-int ColorYellow = 7;
-int ColorOrange = 8;
-int ColorBrown = 9;
-int ColorPink = 10;
-int ColorDkGrey = 11;
-int ColorMdGrey = 12;
-int ColorLtGreen = 13;
-int ColorLtBlue = 14;
-int ColorLtGrey = 15;
+unsigned char ColorBlack = 0;
+unsigned char ColorWhite = 1;
+unsigned char ColorRed = 2;
+unsigned char ColorCyan = 3;
+unsigned char ColorPurple = 4;
+unsigned char ColorGreen = 5;
+unsigned char ColorBlue = 6;
+unsigned char ColorYellow = 7;
+unsigned char ColorOrange = 8;
+unsigned char ColorBrown = 9;
+unsigned char ColorPink = 10;
+unsigned char ColorDkGrey = 11;
+unsigned char ColorMdGrey = 12;
+unsigned char ColorLtGreen = 13;
+unsigned char ColorLtBlue = 14;
+unsigned char ColorLtGrey = 15;
 
 string C64PaletteNames[23] {
 "00 (C64HQ)",
@@ -132,7 +132,7 @@ int MaxNumDirEntries = ((0xa000 - 0x800) / 0x20) - 2;   //1214 + header + blocks
     int ThisDirEntry = 0;
 #endif
 
-unsigned char CurrentColor = 0x0e;      //We start with light blue
+unsigned char CurrentColor = ColorLtBlue;      //We start with light blue
 
 bool QuotedText = false;
 //bool HeaderText = true;
@@ -844,7 +844,7 @@ void chrout(unsigned char ThisChar)
                                 ColRam[CharY * 80] = CurrentColor;
                             }
 
-                            if(CursorY < 24)
+                            if (CursorY < 24)
                             {
                                 CursorY++;
                             }
@@ -4927,7 +4927,7 @@ bool ImportFromImage()
     }
     else if (DirArtType == "bmp")
     {
-        if(!DecodeBmp())
+        if (!DecodeBmp())
         {
             return false;
         }
