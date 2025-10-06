@@ -696,7 +696,6 @@ void OutputCR()
 {
     NumInserts = 0;
     QuotedText = false;
-    //HeaderText = false;
     InvertedText = false;
     CharX = 0;
     CharY++;
@@ -766,8 +765,32 @@ void chrout(unsigned char ThisChar)
                         else if (ThisChar == 0x13)
                         {
                             //Home
+                            int i = CursorY;
+                            while (i > 0)
+                            {
+                                if (CharX >= 40)
+                                {
+                                    if (ScrRam[(size_t)(CharY * 80) + 40] != 0x00)
+                                    {
+                                        CharX = 0;
+                                    }
+                                    else
+                                    {
+                                        CharY--;
+                                    }
+                                }
+                                else
+                                {
+                                    CharY--;
+                                    if (ScrRam[(size_t)(CharY * 80) + 40] != 0x00)
+                                    {
+                                        CharX = 40;
+                                    }
+                                }
+                                i--;
+                            }
+                            //CharY -= CursorY;
                             CharX = 0;
-                            CharY = 0;
                             CursorX = 0;
                             CursorY = 0;
                             return;
@@ -1032,8 +1055,32 @@ void chrout(unsigned char ThisChar)
                             else if (ThisChar == 0x13)
                             {
                                 //0x93 - clear screen
+                                int i = CursorY;
+                                while (i > 0)
+                                {
+                                    if (CharX >= 40)
+                                    {
+                                        if (ScrRam[(size_t)(CharY * 80) + 40] != 0x00)
+                                        {
+                                            CharX = 0;
+                                        }
+                                        else
+                                        {
+                                            CharY--;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        CharY--;
+                                        if (ScrRam[(size_t)(CharY * 80) + 40] != 0x00)
+                                        {
+                                            CharX = 40;
+                                        }
+                                    }
+                                    i--;
+                                }
+                                //CharY -= CursorY;
                                 CharX = 0;
-                                CharY = 0;
                                 CursorX = 0;
                                 CursorY = 0;
                                 for (size_t i = 0; i < ScrRam.size(); i++)
@@ -1157,10 +1204,36 @@ bool CreatePng()
         }
     }
 
+    int FirstEntry = 0;
+
+    for (size_t i = 0; i * 80 < ColRam.size(); i++)
+    {
+        bool EntryUsed = false;
+        for (size_t j = 0; j < 80; j++)
+        {
+            if (ScrRam[(i * 80) + j] != 0x20 && ScrRam[(i * 80) + j] != 0x00)
+            {
+                if (ColRam[(i * 80) + j] != 0xff && ColRam[(i * 80) + j] != 0x06)
+                {
+                    EntryUsed = true;
+                    break;
+                }
+            }
+        }
+        if (!EntryUsed)
+        {
+            FirstEntry++;
+        }
+        else
+        {
+            break;
+        }
+    }
+
     ImgWidth = 384;
 
 #ifdef AddBlockCount
-    ImgHeight = iNumDirEntries > 24 ? (iNumDirEntries * 8) + 72 : 272;
+    ImgHeight = (iNumDirEntries - FirstEntry) > 24 ? ((iNumDirEntries - FirstEntry) * 8) + 72 : 272;
 #elif
     ImgHeight = NumEntries > 24 ? (NumEntries * 8) + 8 + 72 : 272;
 #endif
@@ -1202,7 +1275,7 @@ bool CreatePng()
 
     int PngX = ScreenLeft;
     int PngY = ScreenTop;
-    int i = 0;
+    int i = FirstEntry;
     
     while ((size_t)(i * 80) < ScrRam.size())
     {
@@ -1683,6 +1756,12 @@ bool ConvertD64ToGif()
 
                 if (NextChar != 0xa0)
                 {
+                    if (NextChar == 0x8d && CursorY == 24) //Return in the file name - add additional gif frames if we are at the bottom of the screen to better emulate screen scrolling
+                    {
+                        CreateGifFrame();
+                        GifWriteFrame(&Gif, GifImage, GifWidth, GifHeight, 2);
+                        GifWriteFrame(&Gif, GifImage, GifWidth, GifHeight, 2);
+                    }
                     chrout(NextChar);
                 }
                 else
@@ -2070,7 +2149,7 @@ bool ConvertD64ToPng()
     if ((size_t)RamSize < ScrRam.size())
     {
         ScrRam.resize(RamSize);
-        ScrRam.resize(RamSize);
+        ColRam.resize(RamSize);
     }
 
     return CreatePng();
@@ -3425,7 +3504,7 @@ bool AddAsmDirEntry(string AsmDirEntry)
                         }
                         for (size_t i = 0; i < 16; i++)
                         {
-                            Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = Entry[i];
+                            Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 3 + i] = Petscii2DirArt[Entry[i]];
                         }
                     }
                     else
@@ -5093,7 +5172,7 @@ int main(int argc, char* argv[])
 {
     cout << "\n";
     cout << "*********************************************************\n";
-    cout << "DART 1.4 - Directory Art Importer by Sparta (C) 2022-2025\n";
+    cout << "DART 1.5 - Directory Art Importer by Sparta (C) 2022-2025\n";
     cout << "*********************************************************\n";
     cout << "\n";
 
@@ -5101,12 +5180,12 @@ int main(int argc, char* argv[])
     {
 
     #ifdef DEBUG
-        InFileName = "c:/dart/test/output/art1.png";
-        OutFileName = "c:/dart/test.d64";
-        argSkippedEntries = "8";
-        argFirstImportedEntry = "16";
-        argEntryType = "del";
-        argPalette = "18";
+        InFileName = "c:\\darttest\\Test\\anim\\tiki_nui_GP.d64";
+        OutFileName = "c:\\darttest\\test\\anim\\tiki_nui_GP.png";
+        //argSkippedEntries = "8";
+        //argFirstImportedEntry = "16";
+        //argEntryType = "del";
+        //argPalette = "18";
     #else
         cout << "Usage: dart input [options]\n";
         cout << "options:    -o <output.d64> or <output.png> or <output.gif>\n";

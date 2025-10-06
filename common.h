@@ -10,12 +10,12 @@
 #include <stdio.h>      /* printf, NULL */
 #include <stdlib.h>     /* srand, rand */
 #include <iomanip>
-#include <iostream>
 #include <sstream>
 #include <filesystem>
 #include <cmath>
 #include <math.h>
 #include "thirdparty/lodepng.h"
+#include <locale>
 
 using namespace std;
 
