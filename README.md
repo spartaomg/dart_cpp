@@ -1,18 +1,20 @@
-# DART - Directory Art Importer for the Commodore 64 by Sparta/Genesis Project (C) 2022-2023
+# DART - Directory Art Importer for the Commodore 64 by Sparta/Genesis Project (C) 2022-2026
 
-DART is a simple command-line tool that imports directory art from a variety of source file types to D64 disk images.
+DART is a simple command-line tool that imports directory art from a variety of source file types to D64, D81, and D82
+disk images.
 
 Usage:
 ------
-dart input -o [output.d64] -s [skipped entries] -t [default entry type] -f [first imported entry] -l [last imported entry]
+dart input -o [output.d64/output.d81/output.d82] -s [skipped entries] -t [default entry type] -f [first imported entry]
+     -l [last imported entry]
 
 input - the file from which the directory art will be imported. See accepted file types below.
 
--o [output.d64] - the D64 file to which the directory art will be imported. This parameter is optional. If not
-       entered, DART will create an input_out.d64 file. The output file name can also be defined in KickAss ASM
-       input files.
+-o [output.d64/output.d81/output.d82] - the disk image file to which the directory art will be imported. This parameter
+       is optional. If not entered, DART will create an input_out.d64 file by default. The output file name can also be
+	   defined in KickAss ASM input files.
 
--s [skipped entries] - the number of entries in the directory of the output.d64 that you don't want to overwrite.
+-s [skipped entries] - the number of entries in the directory of the output disk image that you don't want to overwrite.
        E.g. use 1 if you want to leave the first entry untouched. To append the directory art to the end of the
        existing directory, use 'all' instead of a numeric value. This parameter is optional. If not specified, the
        default value is 0 and DART will overwrite all existing directory entries.
@@ -31,14 +33,14 @@ input - the file from which the directory art will be imported. See accepted fil
 You can only import from one input file at a time. DART will overwrite the existing directory entries in the output
 file (after skipping the number of entries defined with the -s option) with the new, imported ones, leaving only the
 track:sector pointers intact. To attach the imported DirArt to the end of the existing directory, use the -s option
-with 'all' instead of a number. This allows importing multiple DirArts into the same D64 as long as there is space
-on track 18. DART does not support directories expanding beyond track 18. The new entries' type can be modified with
-the -t option or it can be defined separately in D64 and KickAss ASM input files. You can also define which DirArt
-entries you want to import from the input file using the -f and -l options. Both can take 1-based numbers as values
-(i.e., 1 means first).The directory header and ID can only be imported from D64 and ASM files. All other input file types must only
-consist of directory entries, without a directory header and ID. DART will always import the directory header and ID
-from D64 and ASM files, except when the -s option is used with 'all' (append mode), in which case it will only import
-them if they are not defined in the output file.
+with 'all' instead of a number. This allows importing multiple DirArts into the same output disk image as long as
+there is directory space. The new entries' type can be modified with the -t option or it can be defined separately
+in D64 and KickAss ASM input files. You can also define which DirArt entries you want to import from the input file
+using the -f and -l options. Both can take 1-based numbers as values (i.e., 1 means first).The directory header and
+ID can only be imported from D64 and ASM files. All other input file types must only consist of directory entries,
+without a directory header and ID. DART will always import the directory header and ID from D64 and ASM files, except
+when the -s option is used with 'all' (append mode), in which case it will only import them if they are not defined
+in the output file.
 
 Accepted input file types:
 --------------------------
@@ -104,13 +106,23 @@ dart MyDirArt.pet
 DART will create MyDirArt_out.d64 (if it doesn't already exist), and will import all DirArt entries from MyDirArt.pet
 into it, overwriting all existing directory entries, using del as entry type.
 
-Example 2:
+Example 2a:
 ----------
 
-dart MyDirArt.c -o MyDemo.d64
+dart MyDirArt.c -o MyDemo.d64 -n "demo 2026" -i "-g*p-"
 
-DART will import the DirArt from a Marq's PETSCII Editor C array file into MyDemo.d64 overwriting all existing
-directory entries, using del as entry type.
+Example 2b:
+-----------
+
+dart MyDirArt.c -o MyDemo.d82 -n "petpeeve" -i "-rab-"
+
+Example 2c:
+-----------
+
+dart MyDirArt.c -o MyDemo.d81 -n "demo 1581" -i "-rab-"
+
+DART will import the DirArt from a Marq's PETSCII Editor C array file into MyDemo.d64/MyDemo.d82/MyDemo.d81 overwriting
+all existing directory entries using del as entry type, and it will update the disk name & ID in the output disk image.
 
 Example 3:
 ----------

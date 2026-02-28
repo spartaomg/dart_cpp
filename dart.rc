@@ -61,8 +61,8 @@ MAINICON                ICON                    "dart.ico"
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,5,25,1006
- PRODUCTVERSION 1,5,25,1006
+ FILEVERSION 1,5,26,228
+ PRODUCTVERSION 1,5,26,228
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -79,12 +79,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Genesis Project"
             VALUE "FileDescription", "DART - Directory Art Importer for the Commodore 64 by Sparta"
-            VALUE "FileVersion", "1.5.25.1006"
+            VALUE "FileVersion", "1.5.26.0228"
             VALUE "InternalName", "dart.exe"
-            VALUE "LegalCopyright", "Copyright (C) 2022-2025"
+            VALUE "LegalCopyright", "Copyright (C) 2022-2026"
             VALUE "OriginalFilename", "dart.exe"
             VALUE "ProductName", "DART - Directory Art Importer for the Commodore 64 by Sparta"
-            VALUE "ProductVersion", "1.5.25.1006"
+            VALUE "ProductVersion", "1.5.26.0228"
         END
     END
     BLOCK "VarFileInfo"

@@ -13,6 +13,8 @@ int GifFrameCount = 0;
 
 const int StdDiskSize = (664 + 19) * 256;
 const int ExtDiskSize = StdDiskSize + (85 * 256);
+const int D81DiskSize = 819200;
+const int D82DiskSize = 1066496;
 
 const int NumSectorsTrack18 = 19;
 int NumSectorsOnTrack = NumSectorsTrack18;
@@ -35,6 +37,7 @@ string argLastImportedEntry = "";
 string argDiskName = "";
 string argDiskID = "";
 string argPalette = "16";
+string argTargetMachine = "c64";
 
 unsigned char FileType = 0x80;  //Default file type is DEL
 int NumSkippedEntries = 0;      //We are overwriting the whole directory by default
@@ -108,8 +111,24 @@ string C64PaletteNames[23] {
 unsigned int BkgColor = 0;  // ColorBlue;       //dark blue
 //unsigned int ForeColor = ColorLtBlue;      //light blue
 
+enum class DiskFormat
+{
+    D64,
+    D81,
+    D82
+};
+
+DiskFormat CurrentDiskFormat = DiskFormat::D64;
+
+size_t FormatDirTrack = 18;
+size_t FormatBamTrack = 18;
+size_t FormatMaxTrack = 40;
+size_t FormatDirStartSector = 1;
+size_t FormatDiskNameOffset = 0x90;
+size_t FormatDiskIdOffset = 0xa2;
+
 size_t DirTrack = 18, DirSector = 1, LastDirTrack{}, LastDirSector{};
-size_t Track[41]{};
+size_t Track[156]{}; // max size of d82
 
 int ScreenLeft = 32;
 int ScreenTop = 35;
@@ -126,7 +145,15 @@ size_t ScrHeight = 0;
 bool HasBorders = false;
 
 int NumDirEntries = 0;
-int MaxNumDirEntries = ((0xa000 - 0x800) / 0x20) - 2;   //1214 + header + blocks free, this fills up the whole BASIC RAM
+
+const int MaxNumDirEntriesC64 = ((0xa000 - 0x800) / 0x20) - 2; //1214 + header + blocks free
+const int MaxNumDirEntriesPET8 = ((0x2000 - 0x400) / 0x20) - 2; //222 + header + blocks free
+const int MaxNumDirEntriesPET16 = ((0x4000 - 0x400) / 0x20) - 2; //478 + header + blocks free
+const int MaxNumDirEntriesPET32 = ((0x8000 - 0x400) / 0x20) - 2; //990 + header + blocks free
+
+//const int MaxNumDirEntriesD64 = ((0xa000 - 0x800) / 0x20) - 2; //1214 + header + blocks free
+//const int MaxNumDirEntriesD81D82 = 1581;
+int MaxNumDirEntries = MaxNumDirEntriesC64;
 
 #ifdef DEBUG
     int ThisDirEntry = 0;
@@ -176,6 +203,72 @@ BITMAPINFOHEADER BmpInfoHeader;
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
+size_t GetSectorsPerTrack(size_t T)
+{
+	if (CurrentDiskFormat == DiskFormat::D81)
+	{
+		(void)T;
+		return 40;
+	}
+
+	if (CurrentDiskFormat == DiskFormat::D82)
+	{
+		size_t LocalTrack = ((T - 1) % 77) + 1;
+		if (LocalTrack <= 39) return 29;
+		if (LocalTrack <= 53) return 27;
+		if (LocalTrack <= 64) return 25;
+		return 23;
+	}
+
+	if (T <= 17) return 21;
+	if (T <= 24) return 19;
+	if (T <= 30) return 18;
+	return 17;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+void CreateTrackTable()
+{
+	fill(begin(Track), end(Track), 0);
+	Track[1] = 0;
+
+	//if ((CurrentDiskFormat == DiskFormat::D81) || (CurrentDiskFormat == DiskFormat::D82))
+	//{
+	for (size_t t = 1; t < FormatMaxTrack; t++)
+	{
+		Track[t + 1] = Track[t] + (GetSectorsPerTrack(t) * 256);
+	}
+	//}
+	/*
+	else
+	{
+		for (int t = 1; t < FormatMaxTrack; t++)
+		{
+			if (t < 18)
+			{
+				Track[t + 1] = Track[t] + ((size_t)21 * 256);
+			}
+			else if (t < 25)
+			{
+				Track[t + 1] = Track[t] + ((size_t)19 * 256);
+			}
+			else if (t < 31)
+			{
+				Track[t + 1] = Track[t] + ((size_t)18 * 256);
+			}
+			else
+			{
+				Track[t + 1] = Track[t] + ((size_t)17 * 256);
+			}
+		}
+	}
+	*/
+}
+
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
 string ConvertIntToHextString(const int i, const int hexlen)
 {
     std::stringstream hexstream;
@@ -216,6 +309,169 @@ bool IsHexString(const string& s)
 bool IsNumeric(const string& s)
 {
     return !s.empty() && find_if(s.begin(), s.end(), [](unsigned char c) { return !isdigit(c); }) == s.end();
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+bool IsValidTrack(int T)
+{
+    return (T > 0) && ((size_t)T <= FormatMaxTrack);
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+size_t GetDiskNamePos()
+{
+    return Track[FormatDirTrack] + FormatDiskNameOffset;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+size_t GetDiskIdPos()
+{
+    return Track[FormatDirTrack] + FormatDiskIdOffset;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+bool GetBamEntryPosition(size_t T, size_t& EntryPos, int& BitmapBytes)
+{
+    if ((T == 0) || (T > FormatMaxTrack))
+    {
+        return false;
+    }
+
+    if (CurrentDiskFormat == DiskFormat::D82)
+    {
+        size_t EntryIndex = T - 1;
+        size_t BamSector = (EntryIndex / 50) * 3;
+        size_t BamOffset = 6 + ((EntryIndex % 50) * 5);
+        EntryPos = Track[FormatBamTrack] + (BamSector * 256) + BamOffset;
+        BitmapBytes = 4;
+        return true;
+    }
+
+    if (CurrentDiskFormat == DiskFormat::D81)
+    {
+        size_t EntryIndex = T - 1;
+        size_t BamSector = 1 + (EntryIndex / 40);
+        size_t BamOffset = 0x10 + ((EntryIndex % 40) * 6);
+        EntryPos = Track[FormatBamTrack] + (BamSector * 256) + BamOffset;
+        BitmapBytes = 5;
+        return true;
+    }
+
+    EntryPos = Track[FormatBamTrack] + (T * 4) + ((T > 35) ? (7 * 4) : 0);
+    BitmapBytes = 3;
+    return true;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+unsigned char GetTrackFreeSectors(const vector<unsigned char>& DiskImage, size_t T)
+{
+    size_t EntryPos = 0;
+    int BitmapBytes = 0;
+    if (!GetBamEntryPosition(T, EntryPos, BitmapBytes))
+    {
+        return 0;
+    }
+    return DiskImage[EntryPos];
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+void SetDiskNameAndId(const string& Name, const string& ID)
+{
+    if (!Name.empty())
+    {
+        size_t NamePos = GetDiskNamePos();
+        for (size_t i = 0; i < 16; i++)
+        {
+            Disk[NamePos + i] = (i < Name.size()) ? Ascii2DirArt[toupper(Name[i])] : 0xa0;
+        }
+    }
+
+    if (!ID.empty())
+    {
+        size_t IdPos = GetDiskIdPos();
+        for (size_t i = 0; i < 5; i++)
+        {
+            Disk[IdPos + i] = (i < ID.size()) ? Ascii2DirArt[toupper(ID[i])] : 0xa0;
+        }
+    }
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+bool SetMaxNumDirEntries()
+{
+	for (size_t i = 0; i < argTargetMachine.length(); i++)
+	{
+			argTargetMachine[i] = tolower(argTargetMachine[i]);
+	}
+
+	if (argTargetMachine == "c64")
+	{
+		MaxNumDirEntries = MaxNumDirEntriesC64;
+	}
+	else if (argTargetMachine == "pet8")
+	{
+		MaxNumDirEntries = MaxNumDirEntriesPET8;
+	}
+	else if (argTargetMachine == "pet16")
+	{
+		MaxNumDirEntries = MaxNumDirEntriesPET16;
+	}
+	else if (argTargetMachine == "pet32")
+	{
+		MaxNumDirEntries = MaxNumDirEntriesPET32;
+	}
+	else
+	{
+		return false;
+	}
+
+	return true;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------
+
+void ConfigureFormatFromOutputType()
+{
+    if (OutputType == "d82")
+    {
+        CurrentDiskFormat = DiskFormat::D82;
+        FormatDirTrack = 39;
+        FormatBamTrack = 38;
+        FormatMaxTrack = 154;
+        FormatDirStartSector = 1;
+        FormatDiskNameOffset = 6;
+        FormatDiskIdOffset = 24;
+        //MaxNumDirEntries = MaxNumDirEntriesD81D82;
+    }
+    else if (OutputType == "d81")
+    {
+        CurrentDiskFormat = DiskFormat::D81;
+        FormatDirTrack = 40;
+        FormatBamTrack = 40;
+        FormatMaxTrack = 80;
+        FormatDirStartSector = 3;
+        FormatDiskNameOffset = 4;
+        FormatDiskIdOffset = 22;
+        //MaxNumDirEntries = MaxNumDirEntriesD81D82;
+    }
+    else
+    {
+        CurrentDiskFormat = DiskFormat::D64;
+        FormatDirTrack = 18;
+        FormatBamTrack = 18;
+        FormatMaxTrack = 40;
+        FormatDirStartSector = 1;
+        FormatDiskNameOffset = 0x90;
+        FormatDiskIdOffset = 0xa2;
+        //MaxNumDirEntries = MaxNumDirEntriesD64;
+    }
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
@@ -1640,7 +1896,7 @@ bool ConvertD64ToGif()
 
     for (int i = 0; i < 16; i++)
     {
-        B = Disk[Track[DirTrack] + 0x90 + i];
+        B = Disk[Track[DirTrack] + FormatDiskNameOffset + i];
         chrout(B);
     }
 
@@ -1652,7 +1908,7 @@ bool ConvertD64ToGif()
 
     for (int i = 0; i < 5; i++)
     {
-        B = Disk[Track[DirTrack] + 0xa2 + i];
+        B = Disk[Track[DirTrack] + FormatDiskIdOffset + i];
         if ((i == 4) && (B == 0xa0))
         {
             B = 0x31;   //if the 5th character is 0xa0 then the C64 displays a "1" instead
@@ -1935,7 +2191,7 @@ bool ConvertD64ToPng()
     unsigned int B = 0;
     for (int i = 0; i < 16; i++)
     {
-        B = Disk[Track[DirTrack] + 0x90 + i];
+        B = Disk[Track[DirTrack] + FormatDiskNameOffset + i];
         chrout(B);
     }
 
@@ -1944,7 +2200,7 @@ bool ConvertD64ToPng()
 
     for (int i = 0; i < 5; i++)
     {
-        B = Disk[Track[DirTrack] + 0xa2 + i];
+        B = Disk[Track[DirTrack] + FormatDiskIdOffset + i];
         if ((i==4) && (B == 0xa0))
         {
             B = 0x31;   //if the 5th character is 0xa0 then the C64 displays a "1" instead
@@ -2159,14 +2415,19 @@ bool ConvertD64ToPng()
 
 void MarkSectorAsUsed(vector<unsigned char>& DiskImage,size_t T, size_t S)
 {
-    size_t NumSectorPtr = Track[18] + (T * 4) + ((T > 35) ? 7 * 4 : 0);
+    size_t NumSectorPtr = 0;
+    int NumBitmapBytes = 0;
+    if (!GetBamEntryPosition(T, NumSectorPtr, NumBitmapBytes))
+    {
+        return;
+    }
     
     unsigned char NumUnusedSectors = 0;
 
     //Calculate number of used sectors -before- update
-    for (size_t I = NumSectorPtr + 1; I <= NumSectorPtr + 3; I++)
+    for (int I = 1; I <= NumBitmapBytes; I++)
     {
-        unsigned char B = DiskImage[I];
+        unsigned char B = DiskImage[NumSectorPtr + (size_t)I];
         for (int J = 0; J < 8; J++)
         {
             if (B % 2 == 1)
@@ -2195,14 +2456,19 @@ void MarkSectorAsUsed(vector<unsigned char>& DiskImage,size_t T, size_t S)
 
 void MarkSectorAsFree(size_t T, size_t S)
 {
-    size_t NumSectorPtr = Track[18] + (T * 4) + ((T > 35) ? 7 * 4 : 0);
+    size_t NumSectorPtr = 0;
+    int NumBitmapBytes = 0;
+    if (!GetBamEntryPosition(T, NumSectorPtr, NumBitmapBytes))
+    {
+        return;
+    }
 
     unsigned char NumUnusedSectors = 0;
 
     //Calculate number of used sectors -before- update
-    for (size_t I = NumSectorPtr + 1; I <= NumSectorPtr + 3; I++)
+    for (int I = 1; I <= NumBitmapBytes; I++)
     {
-        unsigned char B = Disk[I];
+        unsigned char B = Disk[NumSectorPtr + (size_t)I];
         for (int J = 0; J < 8; J++)
         {
             if (B % 2 == 1)
@@ -2230,46 +2496,26 @@ void MarkSectorAsFree(size_t T, size_t S)
 
 void FindNextEmptyDirSector()
 {
-    //Check if the BAM shows any free sectors on the current track
-
     LastDirTrack = DirTrack;
     LastDirSector = DirSector;
 
-    size_t BAMPos = Track[18] + (size_t)(DirTrack * 4);
-
-    while(DirTrack > 0)
+    while (DirTrack > 0)
     {
-        if ((Disk[BAMPos] == 0) || ((Disk[BAMPos] == 1) && (Disk[BAMPos + 1] == 0x01)))
+        if (GetTrackFreeSectors(Disk, DirTrack) == 0)
         {
-            //if (OutputType == "d64")
-            //{
-                //DirSector = 0;
-                //DirPos = 0;     //This will indicate that the directory is full, no more entries are possible
-                //cout << "***INFO***\tDirectory is full.\n";
-                //return;
-            //}
-            //else if ((OutputType == "png") ||(OutputType == "gif"))
-            //{
-                if (DirTrack == 35)
-                {
-                    DirTrack = 17;
-                    NumSectorsOnTrack = 21;
-                }
-                else if (DirTrack >= 18)
+            if (CurrentDiskFormat == DiskFormat::D82)
+            {
+                if (DirTrack >= FormatDirTrack && DirTrack < FormatMaxTrack)
                 {
                     DirTrack++;
-                    if (DirTrack < 25)
-                    {
-                        NumSectorsOnTrack = 19;
-                    }
-                    else if (DirTrack < 31)
-                    {
-                        NumSectorsOnTrack = 18;
-                    }
-                    else
-                    {
-                        NumSectorsOnTrack = 17;
-                    }
+                }
+                else if (DirTrack == FormatMaxTrack)
+                {
+                    DirTrack = (FormatDirTrack > 1) ? (FormatDirTrack - 1) : 0;
+                }
+                else if (DirTrack == FormatBamTrack)
+                {
+                    DirTrack = (DirTrack > 1) ? (DirTrack - 1) : 0;
                 }
                 else if (DirTrack > 1)
                 {
@@ -2277,20 +2523,47 @@ void FindNextEmptyDirSector()
                 }
                 else
                 {
-                    DirSector = 0;
-                    DirPos = 0;
-                    cout << "***INFO***\tDirectory is full.\n";
-                    return;
+                    DirTrack = 0;
                 }
-            //}
+            }
+            else
+            {
+                if (DirTrack == 35)
+                {
+                    DirTrack = 17;
+                }
+                else if (DirTrack >= 18)
+                {
+                    DirTrack++;
+                }
+                else if (DirTrack > 1)
+                {
+                    DirTrack--;
+                }
+                else
+                {
+                    DirTrack = 0;
+                }
+            }
+
+            if (DirTrack == 0)
+            {
+                break;
+            }
         }
 
+        NumSectorsOnTrack = (int)GetSectorsPerTrack(DirTrack);
         DirSector = 1; //Skip the first sector on each track (weird, but sector 0 as next sector in chain on -any- track means end of directory)
 
         while (DirSector < (size_t)NumSectorsOnTrack)   //last sector on track 18 is sector 18 (out of 0-18)
         {
             //Check in BAM if this is really a free sector
-            size_t NumSectorPtr = Track[18] + (DirTrack * 4);
+            size_t NumSectorPtr = 0;
+            int NumBitmapBytes = 0;
+            if (!GetBamEntryPosition(DirTrack, NumSectorPtr, NumBitmapBytes))
+            {
+                break;
+            }
             size_t BitPtr = NumSectorPtr + 1 + (DirSector / 8);     //BAM Position for Bit Change
             unsigned char BitToCheck = 1 << (DirSector % 8);        //BAM Bit to be deleted
 
@@ -2334,7 +2607,7 @@ void FindNextDirPos() {
         DirPos += 32;
         if (DirPos > 256)   //This sector is full, let's find the next dir sector
         {
-            if ((Disk[Track[DirTrack] + (DirSector * 256) + 0] > 0) && (Disk[Track[DirTrack] + (DirSector * 256) + 0] < 36))
+            if ((Disk[Track[DirTrack] + (DirSector * 256) + 0] > 0) && IsValidTrack(Disk[Track[DirTrack] + (DirSector * 256) + 0]))
             {
                 //This is NOT the last sector in the T:S chain, we are overwriting existing dir entries
                 
@@ -2392,8 +2665,8 @@ bool FindLastUsedDirPos()
 
     NumDirEntries = 0;
 
-    unsigned char SectorChain[664]{};
-    unsigned char TrackChain[664]{};
+    vector<unsigned char> SectorChain(5000, 0);
+    vector<unsigned char> TrackChain(5000, 0);
     
     int ChainIndex = 0;
 
@@ -2403,7 +2676,7 @@ bool FindLastUsedDirPos()
     size_t DiskPos = Track[DirTrack] + (DirSector * 256) + 0;
 
     //First find the last used directory sector
-    while ((Disk[DiskPos] > 0) && (Disk[DiskPos] < 36))
+    while ((Disk[DiskPos] > 0) && IsValidTrack(Disk[DiskPos]))
     {
         NumDirEntries += 8;
 
@@ -2493,8 +2766,8 @@ void DeleteOldDir()
 
 bool SkipDirEntries()
 {
-    DirTrack = 18;
-    DirSector = 1;
+    DirTrack = FormatDirTrack;
+    DirSector = FormatDirStartSector;
     DirPos = 0;
 
     size_t DT = DirTrack;
@@ -2517,7 +2790,7 @@ bool SkipDirEntries()
                 DT = Disk[Track[DirTrack] + (DirSector * 256) + 0];
                 DS = Disk[Track[DirTrack] + (DirSector * 256) + 1];
 
-                if ((DT > 0) && (DT < 41))   //Valid track number
+                if ((DT > 0) && IsValidTrack(DT))   //Valid track number
                 {
                     DirTrack = DT;
                     DirSector = DS;
@@ -2599,7 +2872,7 @@ bool SkipDirEntries()
         
         SectorValue = 0;       
 
-        if ((NT != 0) && (NT < 41))
+        if ((NT != 0) && IsValidTrack(NT))
         {
             DT = NT;
             DS = NS;
@@ -2618,7 +2891,156 @@ bool SkipDirEntries()
 
 void CreateDisk()
 {
-    size_t CP = Track[18];
+    if (CurrentDiskFormat == DiskFormat::D81)
+    {
+        DiskSize = D81DiskSize;
+        Disk.clear();
+        Disk.resize(D81DiskSize, 0);
+
+        // Directory header sector (40:0)
+        size_t DirHeaderPos = Track[FormatDirTrack];
+        Disk[DirHeaderPos + 0] = 0x28;
+        Disk[DirHeaderPos + 1] = 0x03;
+        Disk[DirHeaderPos + 2] = 0x44;
+        Disk[DirHeaderPos + 3] = 0x00;
+
+        for (size_t i = 4; i < 0x1d; i++)
+        {
+            Disk[DirHeaderPos + i] = 0xa0;
+        }
+        Disk[DirHeaderPos + 0x19] = 0x33;
+        Disk[DirHeaderPos + 0x1a] = 0x44;
+
+        // BAM headers (40:1 and 40:2)
+        size_t Bam1Pos = Track[FormatBamTrack] + 0x100;
+        Disk[Bam1Pos + 0] = 0x28;
+        Disk[Bam1Pos + 1] = 0x02;
+        Disk[Bam1Pos + 2] = 0x44;
+        Disk[Bam1Pos + 3] = 0xbb;
+        Disk[Bam1Pos + 4] = 0xc9;
+        Disk[Bam1Pos + 5] = 0xc4;
+        Disk[Bam1Pos + 6] = 0xc0;
+
+        size_t Bam2Pos = Track[FormatBamTrack] + 0x200;
+        Disk[Bam2Pos + 0] = 0x00;
+        Disk[Bam2Pos + 1] = 0xff;
+        Disk[Bam2Pos + 2] = 0x44;
+        Disk[Bam2Pos + 3] = 0xbb;
+        Disk[Bam2Pos + 4] = 0xc9;
+        Disk[Bam2Pos + 5] = 0xc4;
+        Disk[Bam2Pos + 6] = 0xc0;
+
+        // Directory first free sector (40:3)
+        Disk[Track[FormatDirTrack] + (3 * 256) + 0] = 0x00;
+        Disk[Track[FormatDirTrack] + (3 * 256) + 1] = 0xff;
+
+        // Fill BAM entries (6 bytes per track: free-count + 5 bitmap bytes)
+        for (size_t T = 1; T <= FormatMaxTrack; T++)
+        {
+            size_t BamEntryPos = 0;
+            int BamBytes = 0;
+            if (!GetBamEntryPosition(T, BamEntryPos, BamBytes))
+            {
+                continue;
+            }
+
+            size_t NumSectors = GetSectorsPerTrack(T);
+            Disk[BamEntryPos] = (unsigned char)NumSectors;
+            for (int i = 0; i < BamBytes; i++)
+            {
+                Disk[BamEntryPos + 1 + i] = 0x00;
+            }
+            for (size_t S = 0; S < NumSectors; S++)
+            {
+                size_t BitPtr = BamEntryPos + 1 + (S / 8);
+                Disk[BitPtr] |= (unsigned char)(1 << (S % 8));
+            }
+        }
+
+        // Reserve directory/BAM sectors
+        MarkSectorAsUsed(Disk, 40, 0);
+        MarkSectorAsUsed(Disk, 40, 1);
+        MarkSectorAsUsed(Disk, 40, 2);
+        MarkSectorAsUsed(Disk, 40, 3);
+        return;
+    }
+
+    if (CurrentDiskFormat == DiskFormat::D82)
+    {
+        DiskSize = D82DiskSize;
+        Disk.clear();
+        Disk.resize(D82DiskSize, 0);
+
+        // Directory header sector (39:0)
+        size_t DirHeaderPos = Track[FormatDirTrack];
+        Disk[DirHeaderPos + 0] = 0x26;
+        Disk[DirHeaderPos + 1] = 0x00;
+        Disk[DirHeaderPos + 2] = 0x43;
+
+        for (size_t i = 6; i < 33; i++)
+        {
+            Disk[DirHeaderPos + i] = 0xa0;
+        }
+
+        Disk[DirHeaderPos + 27] = 0x32;
+        Disk[DirHeaderPos + 28] = 0x43;
+
+        // Directory first free sector (39:1)
+        Disk[Track[FormatDirTrack] + 0x100 + 0] = 0x00;
+        Disk[Track[FormatDirTrack] + 0x100 + 1] = 0xff;
+
+        // BAM chain headers on 38:0,3,6,9
+        const size_t BamSectors[4] = { 0, 3, 6, 9 };
+        const unsigned char BamStart[4] = { 0x01, 0x33, 0x65, 0x97 };
+        const unsigned char BamEnd[4] = { 0x33, 0x65, 0x97, 0x9b };
+        const unsigned char NextTrack[4] = { 0x26, 0x26, 0x26, 0x27 };
+        const unsigned char NextSector[4] = { 0x03, 0x06, 0x09, 0x01 };
+
+        for (size_t i = 0; i < 4; i++)
+        {
+            size_t BP = Track[FormatBamTrack] + (BamSectors[i] * 256);
+            Disk[BP + 0] = NextTrack[i];
+            Disk[BP + 1] = NextSector[i];
+            Disk[BP + 2] = 0x43;
+            Disk[BP + 3] = 0x00;
+            Disk[BP + 4] = BamStart[i];
+            Disk[BP + 5] = BamEnd[i];
+        }
+
+        // Fill BAM entries (5 bytes per track: free-count + 4 bitmap bytes)
+        for (size_t T = 1; T <= FormatMaxTrack; T++)
+        {
+            size_t BamEntryPos = 0;
+            int BamBytes = 0;
+            if (!GetBamEntryPosition(T, BamEntryPos, BamBytes))
+            {
+                continue;
+            }
+
+            size_t NumSectors = GetSectorsPerTrack(T);
+            Disk[BamEntryPos] = (unsigned char)NumSectors;
+            for (int i = 0; i < BamBytes; i++)
+            {
+                Disk[BamEntryPos + 1 + i] = 0x00;
+            }
+            for (size_t S = 0; S < NumSectors; S++)
+            {
+                size_t BitPtr = BamEntryPos + 1 + (S / 8);
+                Disk[BitPtr] |= (unsigned char)(1 << (S % 8));
+            }
+        }
+
+        // Reserve BAM and initial directory sectors
+        MarkSectorAsUsed(Disk, 38, 0);
+        MarkSectorAsUsed(Disk, 38, 3);
+        MarkSectorAsUsed(Disk, 38, 6);
+        MarkSectorAsUsed(Disk, 38, 9);
+        MarkSectorAsUsed(Disk, 39, 0);
+        MarkSectorAsUsed(Disk, 39, 1);
+        return;
+    }
+
+    size_t CP = Track[FormatBamTrack];
 
     DiskSize = StdDiskSize;
     Disk.clear();
@@ -2628,7 +3050,7 @@ void CreateDisk()
     Disk[CP + 1] = 0x01;        //Sector 1
     Disk[CP + 2] = 0x41;        //'A"
 
-    for (size_t i = 0x90; i < 0xab; i++)        //Name, ID, DOS type
+    for (size_t i = FormatDiskNameOffset; i < 0xab; i++)        //Name, ID, DOS type
     {
         Disk[CP + i] = 0xa0;
     }
@@ -2638,13 +3060,13 @@ void CreateDisk()
         Disk[CP + i] = 0xff;
     }
 
-    for (size_t i = 1; i < 18; i++)
+    for (size_t i = 1; i < FormatDirTrack; i++)
     {
         Disk[CP + (i * 4) + 0] = 21;
         Disk[CP + (i * 4) + 3] = 31;
     }
 
-    for (size_t i = 18; i < 25; i++)
+    for (size_t i = FormatDirTrack; i < 25; i++)
     {
         Disk[CP + (i * 4) + 0] = 19;
         Disk[CP + (i * 4) + 3] = 7;
@@ -2662,30 +3084,35 @@ void CreateDisk()
         Disk[CP + (i * 4) + 3] = 1;
     }
 
-    Disk[CP + ((size_t)18 * 4) + 0] = 18;
-    Disk[CP + ((size_t)18 * 4) + 1] = 252;
+    Disk[CP + ((size_t)FormatDirTrack * 4) + 0] = FormatDirTrack;
+    Disk[CP + ((size_t)FormatDirTrack * 4) + 1] = 252;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
 void FixBAM(vector<unsigned char> &DiskImage)
 {
-    DirTrack = 18;
+    if (CurrentDiskFormat != DiskFormat::D64)
+    {
+        return;
+    }
+
+    DirTrack = FormatDirTrack;
     DirSector = 0;
 
     //Earlier versions of Sparkle disks don't mark DirArt sectors as "used" in the BAM. So let's follow the directory block chain and mark them off
-    while ((DiskImage[Track[DirTrack] + (DirSector * 256) + 0] > 0) && (DiskImage[Track[DirTrack] + (DirSector * 256) + 0] < 41))
+    while ((DiskImage[Track[DirTrack] + (DirSector * 256) + 0] > 0) && IsValidTrack(DiskImage[Track[DirTrack] + (DirSector * 256) + 0]))
     {
         int NextT = DiskImage[Track[DirTrack] + (DirSector * 256) + 0];
         int NextS = DiskImage[Track[DirTrack] + (DirSector * 256) + 1];
 
-        if ((NextT == 18) && (NextS == 0))  //Sparkle 1.x marked last secter in chain with 12:00 instead of 00:FF
+        if ((NextT == (int)FormatDirTrack) && (NextS == 0))  //Sparkle 1.x marked last secter in chain with 12:00 instead of 00:FF
         {
             break;
         }
         else
         {
-            if (DirTrack == 18)
+            if (DirTrack == FormatDirTrack)
             {
                 MarkSectorAsUsed(DiskImage, DirTrack, DirSector);   //Only mark sectors off on track 18, to keep the original number of blocks free
             }
@@ -2697,7 +3124,7 @@ void FixBAM(vector<unsigned char> &DiskImage)
     //Mark last sector as used if there is at least one dir entry (this will avoid marking the first sector off if the dir is completely empty)
     if (DiskImage[Track[DirTrack] + (DirSector * 256) + 2] != 0)
     {
-        if (DirTrack == 18)
+        if (DirTrack == FormatDirTrack)
         {
             MarkSectorAsUsed(DiskImage, DirTrack, DirSector);   //but only if we are still on track 18
         }
@@ -2711,7 +3138,7 @@ void FixBAM(vector<unsigned char> &DiskImage)
     //Sparkle 2.0 dir(0) = $f7 $ff $73 $00
     //Sparkle 2.1 dir(0) = $77 $7f $63 $00 (same in 3.0+)
 
-    DirTrack = 18;
+    DirTrack = FormatDirTrack;
     DirSector = 17;
     if (((DiskImage[Track[DirTrack] + (DirSector * 256) + 0] == 0xf7) &&
         (DiskImage[Track[DirTrack] + (DirSector * 256) + 255] == 0xff) &&
@@ -2736,16 +3163,32 @@ bool OpenOutFile()
     {
         CreateDisk();           //PNG output - creating a virtual D64 first from the input file which will then be converted to PNG
     }
-    else if (OutputType == "d64")
+    else if ((OutputType == "d64") || (OutputType == "d81") || (OutputType == "d82"))
     {
         DiskSize = ReadBinaryFile(OutFileName, Disk);   //Load the output file if it exists
 
         if (DiskSize < 0)
         {
-            //Output file doesn't exits, create an empty D64
+            //Output file doesn't exits, create an empty disk
             CreateDisk();
         }
-        else if ((DiskSize != StdDiskSize) && (DiskSize != ExtDiskSize))    //Otherwise make sure the output disk is the correct size
+        else if (CurrentDiskFormat == DiskFormat::D64)
+        {
+            if ((DiskSize != StdDiskSize) && (DiskSize != ExtDiskSize))    //Otherwise make sure the output disk is the correct size
+            {
+                cerr << "***ABORT***\t Invalid output disk file size!\n";
+                return false;
+            }
+        }
+        else if (CurrentDiskFormat == DiskFormat::D81)
+        {
+            if (DiskSize != D81DiskSize)
+            {
+                cerr << "***ABORT***\t Invalid output disk file size!\n";
+                return false;
+            }
+        }
+        else if (DiskSize != D82DiskSize)
         {
             cerr << "***ABORT***\t Invalid output disk file size!\n";
             return false;
@@ -2754,8 +3197,8 @@ bool OpenOutFile()
         FixBAM(Disk);        //Earlier Sparkle versions didn't mark DirArt and internal directory sectors off in the BAM
     }
 
-    DirTrack = 18;
-    DirSector = 1;
+    DirTrack = FormatDirTrack;
+    DirSector = FormatDirStartSector;
     DirPos = 0;             //This will allow to start with the very first dir slot in overwrite mode
 
     return true;
@@ -2802,7 +3245,10 @@ bool ImportFromD64()
         return false;
     }
 
-    if (DA[Track[18] + 0x90] != 0xa0)       //Import directory header only if one exists in input disk image
+    size_t OutNamePos = GetDiskNamePos();
+    size_t OutIdPos = GetDiskIdPos();
+
+    if (DA[Track[FormatDirTrack] + FormatDiskNameOffset] != 0xa0)       //Import directory header only if one exists in input disk image
     {
         if (!argDiskName.empty())
         {
@@ -2811,7 +3257,7 @@ bool ImportFromD64()
 
         for (int i = 0; i < 16; i++)
         {
-            Disk[Track[18] + 0x90 + i] = DA[Track[18] + 0x90 + i];
+            Disk[OutNamePos + i] = DA[Track[FormatDirTrack] + FormatDiskNameOffset + i];
         }
     }
     else if (!argDiskName.empty())          //Otherwise, check if disk name is specified in command line
@@ -2820,16 +3266,16 @@ bool ImportFromD64()
         {
             if (i < argDiskName.size())
             {
-                Disk[Track[18] + 0x90 + i] = Ascii2DirArt[toupper(argDiskName[i])];
+                Disk[OutNamePos + i] = Ascii2DirArt[toupper(argDiskName[i])];
             }
             else
             {
-                Disk[Track[18] + 0x90 + i] = 0xa0;
+                Disk[OutNamePos + i] = 0xa0;
             }
         }
     }
 
-    if (DA[Track[18] + 0xa2] != 0xa0)       //Import directory ID only if one exists in input disk image
+    if (DA[Track[FormatDirTrack] + FormatDiskIdOffset] != 0xa0)       //Import directory ID only if one exists in input disk image
     {
         if (!argDiskID.empty())
         {
@@ -2838,7 +3284,7 @@ bool ImportFromD64()
 
         for (int i = 0; i < 5; i++)
         {
-            Disk[Track[18] + 0xa2 + i] = DA[Track[18] + 0xa2 + i];
+            Disk[OutIdPos + i] = DA[Track[FormatDirTrack] + FormatDiskIdOffset + i];
         }
     }
     else if (!argDiskID.empty())            //Otherwise, check if disk ID is specified in command line
@@ -2847,11 +3293,11 @@ bool ImportFromD64()
         {
             if (i < argDiskID.size())
             {
-                Disk[Track[18] + 0xa2 + i] = Ascii2DirArt[toupper(argDiskID[i])];
+                Disk[OutIdPos + i] = Ascii2DirArt[toupper(argDiskID[i])];
             }
             else
             {
-                Disk[Track[18] + 0xa2 + i] = 0xa0;
+                Disk[OutIdPos + i] = 0xa0;
             }
         }
     }
@@ -2859,7 +3305,7 @@ bool ImportFromD64()
     //DirTrack = 18;
     //DirSector = 1;
 
-    size_t T = 18;
+    size_t T = FormatDirTrack;
     size_t S = 1;
 
     //bool DirFull = false;
@@ -2919,12 +3365,12 @@ bool ImportFromD64()
     {
         for (int i = 0; i < 72; i++)
         {
-            Disk[Track[18] + i] = DA[Track[18] + i];
+            Disk[Track[FormatDirTrack] + i] = DA[Track[FormatDirTrack] + i];
         }
         //Skip track 18 - some imported D64s have a faulty BAM, track 18 is not included in free block count and we need the correct one there
         for (int i = 76; i < 144; i++)
         {
-            Disk[Track[18] + i] = DA[Track[18] + i];
+            Disk[Track[FormatDirTrack] + i] = DA[Track[FormatDirTrack] + i];
         }
         FixBAM(Disk);       //In case we imported from an old Sparkle disk...
     }
@@ -2945,7 +3391,7 @@ void AddTxtDirEntry(string TxtDirEntry) {
     }
     if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] == 0)            //Update T:S pointer only if it doesn't exits
     {
-        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
+        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = (unsigned char)FormatDirTrack; //Directory track
         Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
     }
 
@@ -3051,7 +3497,7 @@ bool ImportFromBinary() {
                     }
                     if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] == 0)            //Update T:S pointer only if it doesn't exits
                     {
-                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
+                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = (unsigned char)FormatDirTrack; //Directory track
                         Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
                     }
 
@@ -3203,7 +3649,7 @@ bool AddCArrayDirEntry(int RowLen)
                     }
                     if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] == 0)            //Update T:S pointer only if it doesn't exits
                     {
-                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
+                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = (unsigned char)FormatDirTrack; //Directory track
                         Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
                     }
 
@@ -3282,7 +3728,7 @@ bool ImportFromCArray() {
     }
 
     int RowLen = min(ConvertStringToInt(sRowLen), 16);
-    int RowCnt = min(ConvertStringToInt(sRowCnt), 48);
+    int RowCnt = min(ConvertStringToInt(sRowCnt), MaxNumDirEntries);
 
     size_t First = DA.find('{');
     //size_t Last = DA.find('}');
@@ -3436,7 +3882,7 @@ bool AddAsmDirEntry(string AsmDirEntry)
 
                     if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] == 0)            //Update T:S pointer only if it doesn't exit
                     {
-                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
+                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = (unsigned char)FormatDirTrack; //Directory track
                         Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
                     }
 
@@ -3609,18 +4055,21 @@ bool AddAsmDiskParameters()
         OutputType += tolower(OutFileName[i]);
     }
 
-    if ((OutputType != "png") && (OutputType != "gif") && (OutputType != "d64"))
+    if ((OutputType != "png") && (OutputType != "gif") && (OutputType != "d64") && (OutputType != "d81") && (OutputType != "d82"))
     {
         cerr << "***ABORT***\tUnrecognized output file type: " << OutFileName << "\n";
         return false;
     }
+
+    ConfigureFormatFromOutputType();
+    CreateTrackTable();
 
     if (!OpenOutFile())
         return false;
 
     cout << "***INFO***\tImport target " << OutFileName << " specified in ASM source file. Ignoring option -o\n";
 
-    if (OutputType == "d64")
+    if ((OutputType == "d64") || (OutputType == "d81") || (OutputType == "d82"))
     {
         if (AppendMode)
         {
@@ -3678,6 +4127,9 @@ bool AddAsmDiskParameters()
         }
     }
 
+    size_t OutNamePos = GetDiskNamePos();
+    size_t OutIdPos = GetDiskIdPos();
+
     if (!DirHeader.empty())
     {
         if (!argDiskName.empty())
@@ -3689,11 +4141,11 @@ bool AddAsmDiskParameters()
         {
             if (i < DirHeader.size())
             {
-                Disk[Track[18] + 0x90 + i] = Ascii2DirArt[toupper(DirHeader[i])];
+                Disk[OutNamePos + i] = Ascii2DirArt[toupper(DirHeader[i])];
             }
             else
             {
-                Disk[Track[18] + 0x90 + i] = 0xa0;
+                Disk[OutNamePos + i] = 0xa0;
             }
         }
     }
@@ -3703,11 +4155,11 @@ bool AddAsmDiskParameters()
         {
             if (i < argDiskName.size())
             {
-                Disk[Track[18] + 0x90 + i] = Ascii2DirArt[toupper(argDiskName[i])];
+                Disk[OutNamePos + i] = Ascii2DirArt[toupper(argDiskName[i])];
             }
             else
             {
-                Disk[Track[18] + 0x90 + i] = 0xa0;
+                Disk[OutNamePos + i] = 0xa0;
             }
         }
     }
@@ -3748,11 +4200,11 @@ bool AddAsmDiskParameters()
         {
             if (i < DirID.size())
             {
-                Disk[Track[18] + 0xa2 + i] = Ascii2DirArt[toupper(DirID[i])];
+                Disk[OutIdPos + i] = Ascii2DirArt[toupper(DirID[i])];
             }
             else
             {
-                Disk[Track[18] + 0xa2 + i] = 0xa0;
+                Disk[OutIdPos + i] = 0xa0;
             }
         }
     }
@@ -3762,11 +4214,11 @@ bool AddAsmDiskParameters()
         {
             if (i < argDiskID.size())
             {
-                Disk[Track[18] + 0xa2 + i] = Ascii2DirArt[toupper(argDiskID[i])];
+                Disk[OutIdPos + i] = Ascii2DirArt[toupper(argDiskID[i])];
             }
             else
             {
-                Disk[Track[18] + 0xa2 + i] = 0xa0;
+                Disk[OutIdPos + i] = 0xa0;
             }
         }
     }
@@ -3885,7 +4337,7 @@ bool ImportFromPet()
                 }
                 if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] == 0)            //Update T:S pointer only if it doesn't exits
                 {
-                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
+                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = (unsigned char)FormatDirTrack; //Directory track
                     Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
                 }
 
@@ -4021,7 +4473,7 @@ bool ImportFromJson()
                     }
                     if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] == 0)            //Update T:S pointer only if it doesn't exits
                     {
-                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
+                        Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = (unsigned char)FormatDirTrack; //Directory track
                         Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
                     }
 
@@ -4431,7 +4883,7 @@ bool Import384()
             for (int i = 0; i < 16; i++)
             {
                 unsigned int C = Entry[i];
-                Disk[Track[DirTrack] + 0x90 + i] = Petscii2DirArt[C];
+                Disk[Track[DirTrack] + FormatDiskNameOffset + i] = Petscii2DirArt[C];
             }
 
             Idx = 0;
@@ -4470,7 +4922,7 @@ bool Import384()
             for (int i = 0; i < 5; i++)
             {
                 unsigned int C = Entry[i];
-                Disk[Track[DirTrack] + 0xa2 + i] = Petscii2DirArt[C];
+                Disk[Track[DirTrack] + FormatDiskIdOffset + i] = Petscii2DirArt[C];
             }
             HeaderFound = true;
         }
@@ -4649,7 +5101,7 @@ bool Import384()
                 if (DirPos != 0)
                 {
                     Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 0] = FileType;      //"DEL"
-                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
+                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = (unsigned char)FormatDirTrack; //Directory track
                     Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
 
                     Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 28] = EntryNumBlocks % 0x100;
@@ -4876,7 +5328,7 @@ bool Import128()
                 }
                 if (Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] == 0)            //Update T:S pointer only if it doesn't exits
                 {
-                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = 18;            //Track 18
+                    Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 1] = (unsigned char)FormatDirTrack; //Directory track
                     Disk[Track[DirTrack] + (DirSector * 256) + DirPos + 2] = 0;             //Sector 0
                 }
 
@@ -4966,65 +5418,43 @@ bool ImportFromImage()
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------
 
-void CreateTrackTable()
-{
-
-    Track[1] = 0;
-
-    for (int t = 1; t < 40;t++)
-    {
-        if (t < 18)
-        {
-            Track[t + 1] = Track[t] + ((size_t)21 * 256);
-        }
-        else if (t < 25)
-        {
-            Track[t + 1] = Track[t] + ((size_t)19 * 256);
-        }
-        else if (t < 31)
-        {
-            Track[t + 1] = Track[t] + ((size_t)18 * 256);
-        }
-        else
-        {
-            Track[t + 1] = Track[t] + ((size_t)17 * 256);
-        }
-    }
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------------------------
-
 void ShowInfo()
 {
-    cout << "DART is a command-line tool that imports C64 directory art from a variety of source file types to D64 disk images.\n";
-    cout << "It can also create PNG and animated GIF outputs of the directory art.\n\n";
+    cout << "DART is a command-line tool that imports C64 directory art from a variety of source file types to D64, D81, and D82 disk\n";
+    cout << "images. It can also create PNG and animated GIF outputs of the directory art.\n\n";
 
     cout << "Usage:\n";
     cout << "------\n";
-    cout << "dart input -o [output.d64/output.png/output.gif] -n [\"disk name\"] -i [\"disk id\"] -s [skipped entries]\n";
-    cout << "           -t [default entry type] -f [first imported entry] -l [last imported entry]\n\n";
+    cout << "dart input -o [output.d64/output.d81/output.d82/output.png/output.gif] -n [\"disk name\"] -i [\"disk id\"]\n";
+    cout << "           -s [skipped entries] -t [default entry type] -f [first imported entry] -l [last imported entry]\n\n";
 
     cout << "input - the file from which the directory art will be imported. See accepted file types below.\n\n";
 
-    cout << "-o [output.d64/output.png/output.gif] - the D64/PNG/GIF file to which the directory art will be imported. This\n";
-    cout << "       parameter is optional and it will be ignored if it is used with KickAss ASM input files that include the\n";
-    cout << "       'filename' disk parameter. If an output is not specified then DART will create an input_dart.d64 file. If the\n";
-    cout << "       output file is a PNG or GIF then DART will create a PNG \"screenshot\" of the directory listing or an animated\n";
-    cout << "       GIF instead of a D64 file. If there are less than 23 entries then the ouput PNG's size will be 384 x 272 pixels\n";
-    cout << "       (same as a VICE screenshot). If there are at least 23 entries then the height will be ((n + 4) * 8) + 72 pixels.\n";
-    cout << "       The -s option will be ignored if the output is a PNG of GIF (you can't append entries to an existing PNG or GIF).\n\n";
-        
-    cout << "-n [\"disk name\"] - the output D64's disk name (left side of the topmost inverted row of the directory listing), max.\n";
+	cout << "-o [output.d64/output.d81/output.d82/output.png/output.gif] - the output disk/image file to which the directory art will\n";
+    cout << "       be imported. This parameter is optional and it will be ignored if it is used with KickAss ASM input files that\n";
+    cout << "       include the 'filename' disk parameter. If an output is not specified then DART will create an input_dart.d64\n";
+    cout << "       file. If the output file is a PNG or GIF then DART will create a PNG \"screenshot\" of the directory listing or\n";
+    cout << "       an animated GIF instead of a disk image file. If there are less than 23 entries then the ouput PNG's size will be\n";
+    cout << "       384 x 272 pixels (same as a VICE screenshot). If there are at least 23 entries then the height will be\n";
+    cout << "       ((n + 4) * 8) + 72 pixels. The -s option will be ignored if the output is a PNG of GIF (you can't append entries\n";
+	cout << "       to an existing PNG or GIF).\n\n";
+
+	cout << "-m [target machine] - determines the target machine and the maximum number of directory entries. The following values\n";
+	cout << "       are accepted: c64, pet8, pet16, and pet32. The C64 can load an display 1214 directory entries. PET machines with\n";
+	cout << "       8k RAM can load and display 222, with 16k 478, and with 32k maximum 990 directory entries. This parameter is\n";
+	cout << "       optional. If not specified, DART will use c64 as default value.\n\n";
+
+    cout << "-n [\"disk name\"] - the output disk's name (left side of the topmost inverted row of the directory listing), max.\n";
     cout << "       16 characters. Wrap text in double quotes. This parameter is optional and it will be ignored if it is used\n";
     cout << "       with D64 and ASM files that contain this information.\n\n";
 
-    cout << "-i [\"disk id\"] - the output d64's disk ID (right side of the topmost inverted row of the directory listing), max. 5\n";
+    cout << "-i [\"disk id\"] - the output disk's ID (right side of the topmost inverted row of the directory listing), max. 5\n";
     cout << "       characters. Wrap text in double quotes. This parameter is optional and it will be ignored if it is used with\n";;
     cout << "       D64 and ASM files that contain this information.\n\n";
 
-    cout << "-s [skipped entries] - the number of entries in the directory of the output.d64 that you don't want to overwrite.\n";
-    cout << "       E.g. use 1 if you want to leave the first entry untouched. To append the directory art to the end of the\n";
-    cout << "       existing directory, use 'all' instead of a numeric value. This parameter is optional. If not specified, the\n";
+    cout << "-s [skipped entries] - the number of entries in the directory of the output disk (.d64/.d81/.d82) that you don't want to\n";
+    cout << "       overwrite. E.g. use 1 if you want to leave the first entry untouched. To append the directory art to the end of\n";
+    cout << "       the existing directory, use 'all' instead of a numeric value. This parameter is optional. If not specified, the\n";
     cout << "       default value is 0 and DART will overwrite all existing directory entries.\n\n";
 
     cout << "-t [default entry type] - DART will use the file type specified here for each directory art entry, if not otherwise\n";
@@ -5053,11 +5483,10 @@ void ShowInfo()
     cout << "You can only import from one input file at a time. DART will overwrite the existing directory entries in the output\n";
     cout << "file (after skipping the number of entries defined with the -s option) with the new, imported ones, leaving only the\n";
     cout << "track:sector pointers intact. To attach the imported DirArt to the end of the existing directory, use the -s option\n";
-    cout << "with 'all' instead of a number. This allows importing multiple DirArts into the same D64 as long as there is space\n";
-    cout << "on track 18. DART does not support directories expanding beyond track 18. The new entries' type can be modified with\n";
-    cout << "the -t option or it can be defined separately in D64 and KickAss ASM input files. You can also define the first and\n";
-    cout << "last DirArt entries you want to import from the input file using the -f and -l options. Both can take 1-based numbers\n";
-    cout << "as values (i.e., 1 means first).\n\n";
+    cout << "with 'all' instead of a number. This allows importing multiple DirArts into the same output disk image as long as there\n";
+    cout << "is free directory space. The new entries' type can be modified with the -t option or it can be defined separately in D64\n";
+    cout << "and KickAss ASM input files. You can also define the first and last DirArt entries you want to import from the input\n";
+    cout << "file using the -f and -l options. Both can take 1-based numbers as values (i.e., 1 means first).\n\n";
 
     cout << "Accepted input file types:\n";
     cout << "--------------------------\n";
@@ -5130,13 +5559,23 @@ void ShowInfo()
     cout << "DART will create MyDirArt_dart.d64 (if it doesn't already exist) and will import all DirArt entries from MyDirArt.pet\n";
     cout << "into it, overwriting all existing directory entries, using del as entry type.\n\n";
 
-    cout << "Example 2:\n";
-    cout << "----------\n\n";
+    cout << "Example 2a:\n";
+    cout << "-----------\n\n";
 
-    cout << "dart MyDirArt.c -o MyDemo.d64 -n \"demo 2023\" -i \"-g*p-\"\n\n";
+    cout << "dart MyDirArt.c -o MyDemo.d64 -n \"demo 2026\" -i \"-g*p-\"\n\n";
 
-    cout << "DART will import the DirArt from a Marq's PETSCII Editor C array file into MyDemo.d64 overwriting all existing\n";
-    cout << "directory entries, using del as entry type, and it will update the disk name and ID in MyDemo.d64.\n\n";
+    cout << "Example 2b:\n";
+    cout << "-----------\n\n";
+
+    cout << "dart MyDirArt.c -o MyDemo.d82 -n \"petpeeve \" -i \"-rab-\"\n\n";
+
+    cout << "Example 2c:\n";
+    cout << "-----------\n\n";
+
+    cout << "dart MyDirArt.c -o MyDemo.d81 -n \"demo 1581\" -i \"-rab-\"\n\n";
+
+    cout << "DART will import the DirArt from a Marq's PETSCII Editor C array file into MyDemo.d64/MyDemo.d82/MyDemo.d81 overwriting\n";
+    cout << "all existing directory entries using del as entry type, and it will update the disk name & ID in the output disk image.\n\n";
 
     cout << "Example 3:\n";
     cout << "----------\n\n";
@@ -5161,7 +5600,7 @@ void ShowInfo()
     cout << "dart MyDirArt.d64 -o MyDirArt1.png -p 18\n\n";
 
     cout << "DART will import the DirArt from a D64 file and convert it to a PNG, using palette 18 (Pixcen).\n\n";
-    
+
     cout << "DART uses the LodePNG library by Lode Vandevenne (http://lodev.org/lodepng/) to encode and decode PNG files,\n";
     cout << "and gif.h by Charlie Tangora (https://github.com/charlietangora/gif-h) to create animated GIFs.\n\n";
 }
@@ -5171,10 +5610,11 @@ void ShowInfo()
 int main(int argc, char* argv[])
 {
     cout << "\n";
-    cout << "*********************************************************\n";
-    cout << "DART 1.5 - Directory Art Importer by Sparta (C) 2022-2025\n";
-    cout << "*********************************************************\n";
-    cout << "\n";
+    cout << "************************************************************\n";
+    cout << "DART 1.5  -  Directory Art Importer by Sparta (C)  2022-2026\n";
+	cout << "************************************************************\n";
+	cout << "with D81 and D82 disk image format support by Bodo^Rabenauge\n";
+	cout << "\n";
 
     if (argc == 1)
     {
@@ -5188,10 +5628,11 @@ int main(int argc, char* argv[])
         //argPalette = "18";
     #else
         cout << "Usage: dart input [options]\n";
-        cout << "options:    -o <output.d64> or <output.png> or <output.gif>\n";
-        cout << "            -n <\"disk name\">\n";
+        cout << "options:    -o <output.d64> or <output.d81> or <output.d82> or <output.png> or <output.gif>\n";
+		cout << "            -m <target machine>\n";
+		cout << "            -n <\"disk name\">\n";
         cout << "            -i <\"disk id\">\n";
-        cout << "            -s <skipped entries in output.d64>\n";
+        cout << "            -s <skipped entries in output disk image>\n";
         cout << "            -t <default entry type>\n";
         cout << "            -f <first imported entry>\n";
         cout << "            -l <last imported entry>\n";
@@ -5226,16 +5667,33 @@ int main(int argc, char* argv[])
             }
             else
             {
-                cerr << "***ABORT***\tMissing option -o [output.d64/output.png/output.gif] value.\n";
+                cerr << "***ABORT***\tMissing option -o [output.d64/output.d81/output.d82/output.png/output.gif] value.\n";
                 return EXIT_FAILURE;
             }
         }
-        else if ((args[i] == "-n") || (args[i] == "-N"))       //disk name in output D64
+		else if ((args[i] == "-m") || (args[i] == "-M"))		//target machine/model
+		{
+			if (i + 1 < argc)
+			{
+				argTargetMachine = args[++i];
+
+				if (!SetMaxNumDirEntries())
+				{
+					cerr << "***ABORT***\tUnrecognized target machine type: " << argTargetMachine << "\n";
+					return EXIT_FAILURE;
+				}
+			}
+			else
+			{
+				cerr << "***ABORT***\tMissing option -m [target machine] value.\n";
+				return EXIT_FAILURE;
+			}
+		}
+		else if ((args[i] == "-n") || (args[i] == "-N"))       //disk name in output D64
         {
             if (i + 1 < argc)
             {
-                argDiskName = args[++i];
-
+				argDiskName = args[++i];
             }
             else
             {
@@ -5248,7 +5706,6 @@ int main(int argc, char* argv[])
             if (i + 1 < argc)
             {
                 argDiskID = args[++i];
-
             }
             else
             {
@@ -5479,8 +5936,6 @@ int main(int argc, char* argv[])
         PaletteIdx = 16;
     }
 
-    CreateTrackTable();
-
     CorrectFilePathSeparators();        //Replace "\" with "/" which is recognized by Windows as well
 
     //Find the input file's extension
@@ -5530,11 +5985,14 @@ int main(int argc, char* argv[])
         OutputType += tolower(OutFileName[i]);
     }
 
-    if ((OutputType != "png") && (OutputType != "gif") && (OutputType != "d64"))
+    if ((OutputType != "png") && (OutputType != "gif") && (OutputType != "d64") && (OutputType != "d81") && (OutputType != "d82"))
     {
         cerr << "***ABORT***\tUnrecognized output file type: " << OutFileName << "\n";
         return EXIT_FAILURE;
     }
+
+	ConfigureFormatFromOutputType();
+    CreateTrackTable();
 
     if (!OpenOutFile())
     {
@@ -5552,7 +6010,7 @@ int main(int argc, char* argv[])
         Msg = "Importing DirArt entries: all\n";
     }
 
-    if ((OutputType == "d64") && (DirArtType != "asm"))
+    if (((OutputType == "d64") || (OutputType == "d81") || (OutputType == "d82")) && (DirArtType != "asm"))
     {
         if (AppendMode)
         {
@@ -5652,38 +6110,10 @@ int main(int argc, char* argv[])
     //Finally, update the directory header and ID (done separately for ASM and D64 input files)
     if ((DirArtType != "asm") && (DirArtType != "d64"))
     {
-        if (!argDiskName.empty())
-        {
-            for (size_t i = 0; i < 16; i++)
-            {
-                if (i < argDiskName.size())
-                {
-                    Disk[Track[18] + 0x90 + i] = Ascii2DirArt[toupper(argDiskName[i])];
-                }
-                else
-                {
-                    Disk[Track[18] + 0x90 + i] = 0xa0;
-                }
-            }
-        }
-
-        if (!argDiskID.empty())
-        {
-            for (size_t i = 0; i < 5; i++)
-            {
-                if (i < argDiskID.size())
-                {
-                    Disk[Track[18] + 0xa2 + i] = Ascii2DirArt[toupper(argDiskID[i])];
-                }
-                else
-                {
-                    Disk[Track[18] + 0xa2 + i] = 0xa0;
-                }
-            }
-        }
+        SetDiskNameAndId(argDiskName, argDiskID);
     }
 
-    if (OutputType == "d64")
+    if ((OutputType == "d64") || (OutputType == "d81") || (OutputType == "d82"))
     {
         if (!WriteDiskImage(OutFileName))
         {
@@ -5720,9 +6150,9 @@ int main(int argc, char* argv[])
 
     int NumFreeSectors = 0;
 
-    if (DirTrack == 18)
+    if (DirTrack == FormatDirTrack)
     {
-        NumFreeSectors = Disk[Track[18] + (size_t)(18 * 4)];
+        NumFreeSectors = GetTrackFreeSectors(Disk, FormatDirTrack);
         NumFreeEntries = NumFreeSectors * 8;
         for (int i = 2; i < 256; i += 32)
         {
@@ -5733,14 +6163,13 @@ int main(int argc, char* argv[])
         }
     }
 
-    cout << "Directory entry slots remaining unused on track 18: " << dec << NumFreeEntries << "\n";
+    cout << "Directory entry slots remaining unused on track " << dec << FormatDirTrack << ": " << dec << NumFreeEntries << "\n";
 
-    if ((DirTrack != 18) && (DirTrack != 0))
+    if ((DirTrack != FormatDirTrack) && (DirTrack != 0))
     {
-        cout << "DirArt extends beyond track 18.\n";
+        cout << "DirArt extends beyond track " << dec << FormatDirTrack << ".\n";
     }
 
     return EXIT_SUCCESS;
 }
     
-
